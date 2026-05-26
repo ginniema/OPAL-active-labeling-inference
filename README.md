@@ -10,7 +10,7 @@ The BRCA example is in `BRCA/`.
 - `BRCA/archive/BRCA_active_original.ipynb`: preserved copy of the exploratory notebook.
 - `BRCA/utils.py`: shared numerical helpers that are not BRCA-data specific.
 - `BRCA/plotting.py`: shared plotting helpers with a ggplot2 `theme_bw`-style look.
-- `BRCA/data/`: compact tabular inputs used by the notebook.
+- `Data/BRCA/`: compact tabular inputs used by the notebook.
 
 Run notebooks from the `BRCA/` directory so relative paths resolve.
 
