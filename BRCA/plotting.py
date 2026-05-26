@@ -141,7 +141,11 @@ def plot_effective_sample_size(
     show_iqr: bool = False,
     show: bool = True,
 ) -> tuple[plt.Figure, plt.Axes]:
-    """Plot mean effective sample size by budget and estimator."""
+    """Plot mean effective sample size by budget and estimator.
+
+    Interquartile bands are optional via ``show_iqr=True`` and are hidden by
+    default to keep the paper figures clean.
+    """
 
     set_theme_bw()
     methods = _ordered_methods(df)
@@ -487,7 +491,7 @@ def plot_intervals(
 
 
 def save_legend(path: str | Path, show: bool = False) -> tuple[plt.Figure, plt.Axes]:
-    """Save a standalone legend for the BRCA competitor methods."""
+    """Save a standalone legend for the competitor methods."""
 
     set_theme_bw()
     handles = [
