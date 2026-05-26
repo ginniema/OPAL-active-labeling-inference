@@ -1,0 +1,20 @@
+[project]
+name = "active-inference-paper-examples"
+version = "0.1.0"
+description = "Reproducible examples for the active inference paper"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas",
+    "numpy",
+    "scipy",
+    "tqdm",
+    "scikit-learn",
+    "matplotlib",
+    "cvxpy",
+    "patsy",
+    "ipykernel",
+]
+
+[tool.uv]
+dev-dependencies = []
