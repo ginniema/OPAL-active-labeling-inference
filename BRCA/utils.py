@@ -20,6 +20,13 @@ from scipy.stats import norm
 
 HUMAN_N_COL = r"$n_{\mathrm{human}}$"
 EFFECTIVE_N_COL = r"$n_{\mathrm{effective}}$"
+MC_VARIANCE_TARGETS = {
+    "point estimate": "point_estimate",
+    "log point estimate": "log_point_estimate",
+    "lb": "lb",
+    "ub": "ub",
+    "interval width": "interval_width",
+}
 
 
 @dataclass(frozen=True)
@@ -415,11 +422,50 @@ def add_monte_carlo_variance(
 
     out = df.copy()
     grouped = out.groupby(list(group_cols), observed=True)
-    out["mc variance"] = grouped["point estimate"].transform(lambda x: x.var(ddof=1))
-    out["mc sd"] = np.sqrt(out["mc variance"])
-    out["mc log variance"] = grouped["log point estimate"].transform(lambda x: x.var(ddof=1))
-    out["mc log sd"] = np.sqrt(out["mc log variance"])
+    for source_col, safe_name in MC_VARIANCE_TARGETS.items():
+        if source_col not in out.columns:
+            continue
+        variance_col = f"mc {safe_name} variance"
+        sd_col = f"mc {safe_name} sd"
+        out[variance_col] = grouped[source_col].transform(lambda x: x.var(ddof=1))
+        out[sd_col] = np.sqrt(out[variance_col])
+
+    # Backward-compatible aliases used by the first cleaned plotting draft.
+    if "mc point_estimate variance" in out.columns:
+        out["mc variance"] = out["mc point_estimate variance"]
+        out["mc sd"] = out["mc point_estimate sd"]
+    if "mc log_point_estimate variance" in out.columns:
+        out["mc log variance"] = out["mc log_point_estimate variance"]
+        out["mc log sd"] = out["mc log_point_estimate sd"]
     return out
+
+
+def monte_carlo_variance_table(
+    df: pd.DataFrame,
+    group_cols: tuple[str, ...] = (HUMAN_N_COL, "estimator"),
+) -> pd.DataFrame:
+    """Summarize empirical MC variance for estimates and interval quantities."""
+
+    missing_targets = [col for col in MC_VARIANCE_TARGETS if col not in df.columns]
+    if missing_targets:
+        raise ValueError(f"Missing columns required for MC variance summary: {missing_targets}")
+
+    summary = (
+        df.groupby(list(group_cols), observed=True)
+        .agg(
+            point_estimate_mean=("point estimate", "mean"),
+            point_estimate_variance=("point estimate", "var"),
+            lb_mean=("lb", "mean"),
+            lb_variance=("lb", "var"),
+            ub_mean=("ub", "mean"),
+            ub_variance=("ub", "var"),
+            interval_width_mean=("interval width", "mean"),
+            interval_width_variance=("interval width", "var"),
+            coverage=("coverage", "mean"),
+        )
+        .reset_index()
+    )
+    return summary
 
 
 def summarize_monte_carlo(
@@ -435,6 +481,11 @@ def summarize_monte_carlo(
             point_estimate_var=("point estimate", "var"),
             log_point_estimate_mean=("log point estimate", "mean"),
             log_point_estimate_var=("log point estimate", "var"),
+            lb_mean=("lb", "mean"),
+            lb_var=("lb", "var"),
+            ub_mean=("ub", "mean"),
+            ub_var=("ub", "var"),
+            interval_width_var=("interval width", "var"),
             coverage=("coverage", "mean"),
             interval_width=("interval width", "mean"),
             variance_estimate=("variance estimate", "mean"),

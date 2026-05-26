@@ -15,7 +15,7 @@ from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
 
-from utils import EFFECTIVE_N_COL, HUMAN_N_COL
+from utils import EFFECTIVE_N_COL, HUMAN_N_COL, monte_carlo_variance_table
 
 
 METHOD_ORDER = [
@@ -272,6 +272,124 @@ def plot_monte_carlo_variance(
     ax.legend(loc="best", ncol=2)
     _add_budget_fraction_ticks(ax, n_total)
     _finish_axis(ax)
+    fig.tight_layout()
+    _save_show(fig, path, show)
+    return fig, ax
+
+
+def make_monte_carlo_variance_table(df: pd.DataFrame) -> pd.DataFrame:
+    """Return a compact table of MC variance components."""
+
+    summary = monte_carlo_variance_table(df)
+    columns = [
+        HUMAN_N_COL,
+        "estimator",
+        "point_estimate_mean",
+        "point_estimate_variance",
+        "lb_mean",
+        "lb_variance",
+        "ub_mean",
+        "ub_variance",
+        "interval_width_mean",
+        "interval_width_variance",
+        "coverage",
+    ]
+    return summary[columns].sort_values([HUMAN_N_COL, "estimator"]).reset_index(drop=True)
+
+
+def plot_monte_carlo_variance_components(
+    df: pd.DataFrame,
+    path: str | Path | None = None,
+    n_total: int | None = None,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot MC variance of estimate, interval width, and interval endpoints."""
+
+    set_theme_bw(font_scale=1.05)
+    summary = monte_carlo_variance_table(df)
+    methods = _ordered_methods(df)
+    components = [
+        ("point_estimate_variance", "estimate"),
+        ("interval_width_variance", "CI width"),
+        ("lb_variance", "left endpoint"),
+        ("ub_variance", "right endpoint"),
+    ]
+
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharex=True)
+    axes_flat = axes.ravel()
+    for ax, (variance_col, title) in zip(axes_flat, components):
+        for method in methods:
+            sub = summary[summary["estimator"] == method].sort_values(HUMAN_N_COL)
+            if sub.empty:
+                continue
+            values = sub[variance_col].mask(sub[variance_col] <= 0)
+            ax.plot(
+                sub[HUMAN_N_COL],
+                values,
+                label=method,
+                color=METHOD_COLORS[method],
+                linestyle=METHOD_LINESTYLES[method],
+                marker=METHOD_MARKERS[method],
+                markersize=4.8,
+            )
+        ax.set_title(f"Var({title})")
+        ax.set_xlabel(HUMAN_N_COL)
+        ax.set_ylabel("empirical MC variance")
+        ax.set_yscale("log")
+        _finish_axis(ax)
+
+    for ax in axes_flat[2:]:
+        _add_budget_fraction_ticks(ax, n_total, y_offset=-0.18)
+
+    handles, labels = axes_flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.02))
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    _save_show(fig, path, show)
+    return fig, axes
+
+
+def save_monte_carlo_variance_table(
+    df: pd.DataFrame,
+    path: str | Path,
+    max_rows: int | None = None,
+    show: bool = False,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Render the MC variance component table to an image file."""
+
+    set_theme_bw(font_scale=0.85)
+    table = make_monte_carlo_variance_table(df)
+    if max_rows is not None:
+        table = table.head(max_rows)
+
+    display_table = table.copy()
+    numeric_cols = display_table.select_dtypes(include=[np.number]).columns
+    for col in numeric_cols:
+        if col == HUMAN_N_COL:
+            display_table[col] = display_table[col].map(lambda x: f"{x:.0f}")
+        elif "variance" in col:
+            display_table[col] = display_table[col].map(lambda x: f"{x:.3g}")
+        elif col == "coverage":
+            display_table[col] = display_table[col].map(lambda x: f"{x:.2f}")
+        else:
+            display_table[col] = display_table[col].map(lambda x: f"{x:.3f}")
+
+    fig_h = max(2.5, 0.28 * (len(display_table) + 1))
+    fig, ax = plt.subplots(figsize=(14, fig_h))
+    ax.axis("off")
+    table_artist = ax.table(
+        cellText=display_table.values,
+        colLabels=display_table.columns,
+        loc="center",
+        cellLoc="center",
+    )
+    table_artist.auto_set_font_size(False)
+    table_artist.set_fontsize(8)
+    table_artist.scale(1.0, 1.25)
+    for (row, _), cell in table_artist.get_celld().items():
+        cell.set_edgecolor("#BDBDBD")
+        if row == 0:
+            cell.set_facecolor("#F2F2F2")
+            cell.get_text().set_weight("bold")
     fig.tight_layout()
     _save_show(fig, path, show)
     return fig, ax
