@@ -1,6 +1,6 @@
-# Active Inference Paper Examples
+# OPAL Active Labeling Inference
 
-Reproducible code examples for the active-inference paper.
+Reproducible code examples for the OPAL active-labeling inference paper.
 
 ## BRCA
 
@@ -22,4 +22,3 @@ uv sync
 
 or install the dependencies from `pyproject.toml` with your preferred Python
 environment manager.
-

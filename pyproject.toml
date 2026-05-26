@@ -1,7 +1,7 @@
 [project]
-name = "active-inference-paper-examples"
+name = "opal-active-labeling-inference"
 version = "0.1.0"
-description = "Reproducible examples for the active inference paper"
+description = "Reproducible examples for the OPAL active-labeling inference paper"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
