@@ -18,6 +18,8 @@ import pandas as pd
 from utils import EFFECTIVE_N_COL, HUMAN_N_COL, monte_carlo_variance_table
 
 
+ESS_MULTIPLIER_COL = "ESS multiplier over classical"
+
 METHOD_ORDER = [
     "active",
     "active + tuning",
@@ -136,6 +138,42 @@ def _display_method_label(method: str) -> str:
     return METHOD_LABELS.get(method, method)
 
 
+def _multiplier_key_cols(df: pd.DataFrame) -> list[str]:
+    key_cols = [HUMAN_N_COL]
+    for col in ("trial", "num_trial"):
+        if col in df.columns:
+            key_cols.append(col)
+            break
+    return key_cols
+
+
+def make_effective_sample_size_multiplier(
+    df: pd.DataFrame,
+    baseline_method: str = "classical",
+) -> pd.DataFrame:
+    """Return a copy with ESS divided by the matched classical ESS.
+
+    The denominator is matched by budget and, when available, Monte Carlo
+    replicate. This makes the classical multiplier exactly one for every
+    matched row and compares each method against the same replicate.
+    """
+
+    key_cols = _multiplier_key_cols(df)
+    baseline = (
+        df[df["estimator"] == baseline_method]
+        .groupby(key_cols, observed=True)[EFFECTIVE_N_COL]
+        .mean()
+        .reset_index()
+        .rename(columns={EFFECTIVE_N_COL: "_baseline_ess"})
+    )
+    if baseline.empty:
+        raise ValueError(f"No baseline ESS rows found for estimator: {baseline_method}")
+
+    out = df.merge(baseline, on=key_cols, how="inner")
+    out[ESS_MULTIPLIER_COL] = out[EFFECTIVE_N_COL] / out["_baseline_ess"].replace(0, np.nan)
+    return out.drop(columns=["_baseline_ess"])
+
+
 def _add_budget_fraction_ticks(ax: plt.Axes, n_total: int | None, y_offset: float = -0.12) -> None:
     if n_total is None:
         return
@@ -245,6 +283,86 @@ def plot_effective_sample_size(
     return fig, ax
 
 
+def plot_effective_sample_size_multiplier(
+    df: pd.DataFrame,
+    path: str | Path | None = None,
+    n_total: int | None = None,
+    error_bars: str = "sd",
+    error_style: str = "bar",
+    show: bool = True,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Plot ESS as a multiplier over matched classical ESS."""
+
+    if error_bars not in {"none", "se", "sd"}:
+        raise ValueError("error_bars must be one of: 'none', 'se', 'sd'")
+    if error_style not in {"bar", "ribbon"}:
+        raise ValueError("error_style must be one of: 'bar', 'ribbon'")
+
+    set_theme_bw()
+    multiplier_df = make_effective_sample_size_multiplier(df)
+    methods = _ordered_methods(multiplier_df)
+    plot_df = multiplier_df[multiplier_df["estimator"].isin(methods)].copy()
+    summary = (
+        plot_df.groupby([HUMAN_N_COL, "estimator"], observed=True)[ESS_MULTIPLIER_COL]
+        .agg(mean="mean", sd="std", count="count")
+        .reset_index()
+    )
+    summary["se"] = summary["sd"] / np.sqrt(summary["count"])
+
+    fig, ax = plt.subplots(figsize=(7, 4.8))
+    for method in methods:
+        sub = summary[summary["estimator"] == method].sort_values(HUMAN_N_COL)
+        if sub.empty:
+            continue
+        if error_bars != "none" and error_style == "bar":
+            yerr = sub["se"].fillna(0) if error_bars == "se" else sub["sd"].fillna(0)
+            ax.errorbar(
+                sub[HUMAN_N_COL],
+                sub["mean"],
+                yerr=yerr,
+                label=_display_method_label(method),
+                color=METHOD_COLORS[method],
+                linestyle=METHOD_LINESTYLES[method],
+                marker=METHOD_MARKERS[method],
+                markersize=5.5,
+                capsize=3,
+                elinewidth=1,
+                capthick=1,
+            )
+        else:
+            ax.plot(
+                sub[HUMAN_N_COL],
+                sub["mean"],
+                label=_display_method_label(method),
+                color=METHOD_COLORS[method],
+                linestyle=METHOD_LINESTYLES[method],
+                marker=METHOD_MARKERS[method],
+                markersize=5.5,
+            )
+            if error_bars != "none" and error_style == "ribbon":
+                yerr = sub["se"].fillna(0) if error_bars == "se" else sub["sd"].fillna(0)
+                lower = np.maximum(sub["mean"].to_numpy() - yerr.to_numpy(), 0)
+                upper = sub["mean"].to_numpy() + yerr.to_numpy()
+                ax.fill_between(
+                    sub[HUMAN_N_COL].to_numpy(),
+                    lower,
+                    upper,
+                    color=METHOD_COLORS[method],
+                    alpha=0.16,
+                    linewidth=0,
+                )
+
+    ax.axhline(1, color="#666666", linestyle="--", linewidth=1)
+    ax.set_xlabel(HUMAN_N_COL)
+    ax.set_ylabel(ESS_MULTIPLIER_COL)
+    ax.legend(loc="best", ncol=2)
+    _add_budget_fraction_ticks(ax, n_total)
+    _finish_axis(ax)
+    fig.tight_layout()
+    _save_show(fig, path, show)
+    return fig, ax
+
+
 def plot_coverage(
     df: pd.DataFrame,
     alpha: float,
@@ -326,7 +444,9 @@ def plot_sequential_effective_sample_size(
     n_human: int | float | None = None,
     max_iterations: int | None = 50,
     iteration_col: str = "num_trial",
-    title: str | None = "Effective Sample Size per Iteration",
+    title: str | None = "Effective Sample Size Across Sequential Runs",
+    xlabel: str = "Monte Carlo replicate",
+    legend: str = "side",
     show: bool = True,
 ) -> tuple[plt.Figure, plt.Axes]:
     """Plot trial-by-trial ESS for one sequential budget.
@@ -339,6 +459,8 @@ def plot_sequential_effective_sample_size(
     set_theme_bw(font_scale=1.2)
     if iteration_col not in df.columns:
         raise ValueError(f"Iteration column not found: {iteration_col}")
+    if legend not in {"side", "bottom", "best", "none"}:
+        raise ValueError("legend must be one of: 'side', 'bottom', 'best', 'none'")
 
     methods = _ordered_methods(df)
     plot_df = df[df["estimator"].isin(methods)].copy()
@@ -371,13 +493,95 @@ def plot_sequential_effective_sample_size(
             linewidth=2.2,
         )
 
-    ax.set_xlabel("iteration")
+    ax.set_xlabel(xlabel)
     ax.set_ylabel("Number of Effective Samples")
     if title is not None:
         ax.set_title(title)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3)
+    if legend == "side":
+        ax.legend(loc="center left", bbox_to_anchor=(1.02, 0.5), ncol=1, borderaxespad=0)
+        tight_rect = (0, 0, 0.78, 1)
+    elif legend == "bottom":
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3)
+        tight_rect = (0, 0.08, 1, 1)
+    elif legend == "best":
+        ax.legend(loc="best", ncol=2)
+        tight_rect = (0, 0, 1, 1)
+    else:
+        tight_rect = (0, 0, 1, 1)
     _finish_axis(ax)
-    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    fig.tight_layout(rect=tight_rect)
+    _save_show(fig, path, show)
+    return fig, ax
+
+
+def plot_sequential_effective_sample_size_distribution(
+    df: pd.DataFrame,
+    path: str | Path | None = None,
+    n_human: int | float | None = None,
+    max_iterations: int | None = None,
+    iteration_col: str = "num_trial",
+    title: str | None = "Sequential Effective Sample Size Distribution",
+    seed: int = 614,
+    show: bool = True,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Show the raw spread of sequential ESS at one budget."""
+
+    set_theme_bw(font_scale=1.05)
+    methods = _ordered_methods(df)
+    plot_df = df[df["estimator"].isin(methods)].copy()
+    if n_human is None:
+        n_human = float(np.nanmax(plot_df[HUMAN_N_COL]))
+    plot_df = plot_df[plot_df[HUMAN_N_COL] == n_human]
+
+    if max_iterations is not None:
+        iterations = np.sort(plot_df[iteration_col].dropna().unique())[:max_iterations]
+        plot_df = plot_df[plot_df[iteration_col].isin(iterations)]
+
+    data = []
+    labels = []
+    colors = []
+    for method in methods:
+        values = plot_df.loc[plot_df["estimator"] == method, EFFECTIVE_N_COL].dropna().to_numpy()
+        if len(values) == 0:
+            continue
+        data.append(values)
+        labels.append(_display_method_label(method))
+        colors.append(METHOD_COLORS[method])
+
+    fig_h = max(4.0, 0.48 * len(data) + 1.7)
+    fig, ax = plt.subplots(figsize=(7.8, fig_h))
+    positions = np.arange(len(data))
+    box = ax.boxplot(
+        data,
+        vert=False,
+        positions=positions,
+        widths=0.55,
+        patch_artist=True,
+        showfliers=False,
+        whis=(5, 95),
+    )
+    for patch, color in zip(box["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.28)
+        patch.set_edgecolor(color)
+    for key in ("whiskers", "caps", "medians"):
+        for artist in box[key]:
+            artist.set_color("#333333")
+            artist.set_linewidth(1.1)
+
+    rng = np.random.default_rng(seed)
+    for y, (values, color) in enumerate(zip(data, colors)):
+        jitter = rng.normal(0, 0.035, size=len(values))
+        ax.scatter(values, np.full(len(values), y) + jitter, color=color, alpha=0.35, s=14, linewidth=0)
+
+    ax.set_yticks(positions)
+    ax.set_yticklabels(labels)
+    ax.set_xlabel("Number of Effective Samples")
+    if title is not None:
+        ax.set_title(title)
+    ax.grid(axis="y", visible=False)
+    _finish_axis(ax)
+    fig.tight_layout()
     _save_show(fig, path, show)
     return fig, ax
 

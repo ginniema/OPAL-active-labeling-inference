@@ -12,6 +12,8 @@ bars by default, matching the Robust Sampling paper convention. Pass
 `error_bars="none"` to `plot_effective_sample_size` for a clean mean curve,
 `show_se=True` for standard error bars, or `error_style="ribbon"` for shaded
 bands instead of vertical bars.
+Use `plot_effective_sample_size_multiplier` to show ESS relative to the matched
+classical replicate, which puts the classical baseline at exactly 1.
 
 ## BRCA
 
