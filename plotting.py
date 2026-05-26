@@ -21,17 +21,28 @@ from utils import EFFECTIVE_N_COL, HUMAN_N_COL, monte_carlo_variance_table
 METHOD_ORDER = [
     "active",
     "active + tuning",
+    "active+",
     "spline",
     "spline + tuning",
+    "spline+",
     "uniform",
     "classical",
 ]
 
+METHOD_LABELS = {
+    "active+": "active + tuning",
+    "spline": "OPAL",
+    "spline + tuning": "OPAL + tuning",
+    "spline+": "OPAL + tuning",
+}
+
 METHOD_COLORS = {
     "active": "#E69F00",
     "active + tuning": "#E69F00",
+    "active+": "#E69F00",
     "spline": "#009E73",
     "spline + tuning": "#009E73",
+    "spline+": "#009E73",
     "uniform": "#0072B2",
     "classical": "#CC79A7",
     "LLM only": "#D55E00",
@@ -40,8 +51,10 @@ METHOD_COLORS = {
 METHOD_LINESTYLES = {
     "active": "-",
     "active + tuning": "--",
+    "active+": "--",
     "spline": "-",
     "spline + tuning": "--",
+    "spline+": "--",
     "uniform": "-",
     "classical": "-",
     "LLM only": ":",
@@ -50,8 +63,10 @@ METHOD_LINESTYLES = {
 METHOD_MARKERS = {
     "active": "o",
     "active + tuning": "o",
+    "active+": "o",
     "spline": "s",
     "spline + tuning": "s",
+    "spline+": "s",
     "uniform": "D",
     "classical": "X",
     "LLM only": "^",
@@ -115,6 +130,10 @@ def _ordered_methods(df: pd.DataFrame, methods: Iterable[str] | None = None) -> 
         methods = METHOD_ORDER
     present = set(df["estimator"].dropna().unique())
     return [method for method in methods if method in present]
+
+
+def _display_method_label(method: str) -> str:
+    return METHOD_LABELS.get(method, method)
 
 
 def _add_budget_fraction_ticks(ax: plt.Axes, n_total: int | None, y_offset: float = -0.12) -> None:
@@ -184,7 +203,7 @@ def plot_effective_sample_size(
                 sub[HUMAN_N_COL],
                 sub["mean"],
                 yerr=yerr,
-                label=method,
+                label=_display_method_label(method),
                 color=METHOD_COLORS[method],
                 linestyle=METHOD_LINESTYLES[method],
                 marker=METHOD_MARKERS[method],
@@ -197,7 +216,7 @@ def plot_effective_sample_size(
             ax.plot(
                 sub[HUMAN_N_COL],
                 sub["mean"],
-                label=method,
+                label=_display_method_label(method),
                 color=METHOD_COLORS[method],
                 linestyle=METHOD_LINESTYLES[method],
                 marker=METHOD_MARKERS[method],
@@ -259,7 +278,7 @@ def plot_coverage(
         ax.plot(
             sub[HUMAN_N_COL],
             sub[coverage_col],
-            label=method,
+            label=_display_method_label(method),
             color=METHOD_COLORS[method],
             linestyle=METHOD_LINESTYLES[method],
             marker=METHOD_MARKERS[method],
@@ -301,6 +320,68 @@ def plot_finite_population_coverage(
     )
 
 
+def plot_sequential_effective_sample_size(
+    df: pd.DataFrame,
+    path: str | Path | None = None,
+    n_human: int | float | None = None,
+    max_iterations: int | None = 50,
+    iteration_col: str = "num_trial",
+    title: str | None = "Effective Sample Size per Iteration",
+    show: bool = True,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Plot trial-by-trial ESS for one sequential budget.
+
+    The archived sequential simulations store each Monte Carlo replicate as a
+    row. This plot fixes one budget and shows the replicate-level ESS traces,
+    which is useful for visualizing stability across repeated runs.
+    """
+
+    set_theme_bw(font_scale=1.2)
+    if iteration_col not in df.columns:
+        raise ValueError(f"Iteration column not found: {iteration_col}")
+
+    methods = _ordered_methods(df)
+    plot_df = df[df["estimator"].isin(methods)].copy()
+    if n_human is None:
+        n_human = float(np.nanmax(plot_df[HUMAN_N_COL]))
+    plot_df = plot_df[plot_df[HUMAN_N_COL] == n_human]
+
+    iterations = np.sort(plot_df[iteration_col].dropna().unique())
+    if max_iterations is not None:
+        iterations = iterations[:max_iterations]
+        plot_df = plot_df[plot_df[iteration_col].isin(iterations)]
+
+    summary = (
+        plot_df.groupby([iteration_col, "estimator"], observed=True)[EFFECTIVE_N_COL]
+        .mean()
+        .reset_index()
+    )
+
+    fig, ax = plt.subplots(figsize=(9, 5.4))
+    for method in methods:
+        sub = summary[summary["estimator"] == method].sort_values(iteration_col)
+        if sub.empty:
+            continue
+        ax.plot(
+            sub[iteration_col],
+            sub[EFFECTIVE_N_COL],
+            label=_display_method_label(method),
+            color=METHOD_COLORS[method],
+            linestyle=METHOD_LINESTYLES[method],
+            linewidth=2.2,
+        )
+
+    ax.set_xlabel("iteration")
+    ax.set_ylabel("Number of Effective Samples")
+    if title is not None:
+        ax.set_title(title)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.16), ncol=3)
+    _finish_axis(ax)
+    fig.tight_layout(rect=(0, 0.08, 1, 1))
+    _save_show(fig, path, show)
+    return fig, ax
+
+
 def plot_monte_carlo_variance(
     df: pd.DataFrame,
     path: str | Path | None = None,
@@ -329,7 +410,7 @@ def plot_monte_carlo_variance(
         ax.plot(
             sub[HUMAN_N_COL],
             sub[variance_col],
-            label=method,
+            label=_display_method_label(method),
             color=METHOD_COLORS[method],
             linestyle=METHOD_LINESTYLES[method],
             marker=METHOD_MARKERS[method],
@@ -399,7 +480,7 @@ def plot_monte_carlo_variance_components(
             ax.plot(
                 sub[HUMAN_N_COL],
                 values,
-                label=method,
+                label=_display_method_label(method),
                 color=METHOD_COLORS[method],
                 linestyle=METHOD_LINESTYLES[method],
                 marker=METHOD_MARKERS[method],
@@ -435,6 +516,8 @@ def save_monte_carlo_variance_table(
         table = table.head(max_rows)
 
     display_table = table.copy()
+    if "estimator" in display_table.columns:
+        display_table["estimator"] = display_table["estimator"].map(_display_method_label)
     numeric_cols = display_table.select_dtypes(include=[np.number]).columns
     for col in numeric_cols:
         if col == HUMAN_N_COL:
@@ -502,7 +585,7 @@ def plot_intervals(
     ax.axvline(true_value, color="#666666", linestyle="--", linewidth=1)
 
     bar_height = 0.18
-    hatch = {"active + tuning": "///", "spline + tuning": "///"}
+    hatch = {"active + tuning": "///", "active+": "///", "spline + tuning": "///", "spline+": "///"}
     for y, (method, lb, ub) in enumerate(rows_to_plot):
         rect = mpatches.Rectangle(
             (lb, y - bar_height / 2),
@@ -530,18 +613,24 @@ def save_legend(path: str | Path, show: bool = False) -> tuple[plt.Figure, plt.A
     """Save a standalone legend for the competitor methods."""
 
     set_theme_bw()
-    handles = [
-        Line2D(
-            [0],
-            [0],
-            marker=METHOD_MARKERS[method],
-            color=METHOD_COLORS[method],
-            linestyle=METHOD_LINESTYLES[method],
-            markersize=6,
-            label=method,
+    handles = []
+    seen_labels = set()
+    for method in METHOD_ORDER:
+        label = _display_method_label(method)
+        if label in seen_labels:
+            continue
+        seen_labels.add(label)
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                marker=METHOD_MARKERS[method],
+                color=METHOD_COLORS[method],
+                linestyle=METHOD_LINESTYLES[method],
+                markersize=6,
+                label=label,
+            )
         )
-        for method in METHOD_ORDER
-    ]
     fig, ax = plt.subplots(figsize=(8.5, 1.4))
     ax.axis("off")
     ax.legend(handles=handles, loc="center", ncol=3)

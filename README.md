@@ -37,10 +37,15 @@ cleaned notebooks for CheXpert, AlphaFold, and Stance add the repo root to
 - `CheXpert/CheXpert_active_clean.ipynb`: cleaned Cardiomegaly AP-vs-PA workflow.
 - `Alphafold/Alphafold_active_clean.ipynb`: cleaned phosphorylation-vs-nonphosphorylation workflow.
 - `Stance/Stance_active_clean.ipynb`: cleaned stance batch workflow.
+- `Stance/Stance_sequential_clean.ipynb`: cleaned sequential Stance stability workflow using the archived sequential Monte Carlo output.
 
 Each example has `archive/` copies of the exploratory source files and writes
 generated outputs to its local `plots/` and `results/` directories. Compact
 inputs live under `Data/<Example>/`.
+
+For historical consistency, result CSVs keep the original estimator IDs such
+as `spline` and `spline+`. The plotting helpers display these methods as
+`OPAL` and `OPAL + tuning` in figures and rendered tables.
 
 ## Setup
 
