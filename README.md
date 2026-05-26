@@ -7,8 +7,11 @@ Reproducible code examples for the OPAL active-labeling inference paper.
 - `utils.py`: shared numerical helpers and the batch odds-ratio Monte Carlo runner.
 - `plotting.py`: shared ggplot2 `theme_bw`-style plotting helpers.
 
-The effective sample size plot has no error bands by default. Pass
-`show_iqr=True` to `plot_effective_sample_size` if you want interquartile bands.
+The effective sample size plot uses `mean +/- 1` Monte Carlo standard deviation
+bars by default, matching the Robust Sampling paper convention. Pass
+`error_bars="none"` to `plot_effective_sample_size` for a clean mean curve,
+`show_se=True` for standard error bars, or `error_style="ribbon"` for shaded
+bands instead of vertical bars.
 
 ## BRCA
 

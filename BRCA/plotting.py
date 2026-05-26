@@ -138,47 +138,83 @@ def plot_effective_sample_size(
     df: pd.DataFrame,
     path: str | Path | None = None,
     n_total: int | None = None,
-    show_iqr: bool = False,
+    error_bars: str = "sd",
+    error_style: str = "bar",
+    show_se: bool = False,
+    show_iqr: bool | None = None,
     show: bool = True,
 ) -> tuple[plt.Figure, plt.Axes]:
     """Plot mean effective sample size by budget and estimator.
 
-    Interquartile bands are optional via ``show_iqr=True`` and are hidden by
-    default to keep the paper figures clean.
+    By default, this shows one Monte Carlo standard deviation around the mean,
+    matching the Robust Sampling paper's ESS convention. Use
+    ``error_bars="none"`` for a clean mean curve, ``error_bars="se"`` for
+    standard errors, or ``error_style="ribbon"`` for shaded bands instead of
+    vertical bars. ``show_se`` and ``show_iqr`` are retained as deprecated
+    aliases for older notebooks.
     """
+
+    if show_se:
+        error_bars = "se"
+    if show_iqr is not None:
+        error_bars = "sd" if show_iqr else "none"
+    if error_bars not in {"none", "se", "sd"}:
+        raise ValueError("error_bars must be one of: 'none', 'se', 'sd'")
+    if error_style not in {"bar", "ribbon"}:
+        raise ValueError("error_style must be one of: 'bar', 'ribbon'")
 
     set_theme_bw()
     methods = _ordered_methods(df)
     plot_df = df[df["estimator"].isin(methods)].copy()
     summary = (
         plot_df.groupby([HUMAN_N_COL, "estimator"], observed=True)[EFFECTIVE_N_COL]
-        .agg(mean="mean", q25=lambda x: x.quantile(0.25), q75=lambda x: x.quantile(0.75))
+        .agg(mean="mean", sd="std", count="count")
         .reset_index()
     )
+    summary["se"] = summary["sd"] / np.sqrt(summary["count"])
 
     fig, ax = plt.subplots(figsize=(7, 4.8))
     for method in methods:
         sub = summary[summary["estimator"] == method].sort_values(HUMAN_N_COL)
         if sub.empty:
             continue
-        ax.plot(
-            sub[HUMAN_N_COL],
-            sub["mean"],
-            label=method,
-            color=METHOD_COLORS[method],
-            linestyle=METHOD_LINESTYLES[method],
-            marker=METHOD_MARKERS[method],
-            markersize=5.5,
-        )
-        if show_iqr:
-            ax.fill_between(
-                sub[HUMAN_N_COL].to_numpy(),
-                sub["q25"].to_numpy(),
-                sub["q75"].to_numpy(),
+        if error_bars != "none" and error_style == "bar":
+            yerr = sub["se"].fillna(0) if error_bars == "se" else sub["sd"].fillna(0)
+            ax.errorbar(
+                sub[HUMAN_N_COL],
+                sub["mean"],
+                yerr=yerr,
+                label=method,
                 color=METHOD_COLORS[method],
-                alpha=0.16,
-                linewidth=0,
+                linestyle=METHOD_LINESTYLES[method],
+                marker=METHOD_MARKERS[method],
+                markersize=5.5,
+                capsize=3,
+                elinewidth=1,
+                capthick=1,
             )
+        else:
+            ax.plot(
+                sub[HUMAN_N_COL],
+                sub["mean"],
+                label=method,
+                color=METHOD_COLORS[method],
+                linestyle=METHOD_LINESTYLES[method],
+                marker=METHOD_MARKERS[method],
+                markersize=5.5,
+            )
+            if error_bars != "none" and error_style == "ribbon":
+                yerr = sub["se"].fillna(0) if error_bars == "se" else sub["sd"].fillna(0)
+                lower = np.maximum(sub["mean"].to_numpy() - yerr.to_numpy(), 0)
+                upper = sub["mean"].to_numpy() + yerr.to_numpy()
+                ax.fill_between(
+                    sub[HUMAN_N_COL].to_numpy(),
+                    lower,
+                    upper,
+                    color=METHOD_COLORS[method],
+                    alpha=0.16,
+                    linewidth=0,
+                )
 
     ax.set_xlabel(HUMAN_N_COL)
     ax.set_ylabel(EFFECTIVE_N_COL)
