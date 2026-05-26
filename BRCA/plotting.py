@@ -191,15 +191,22 @@ def plot_coverage(
     alpha: float,
     path: str | Path | None = None,
     n_total: int | None = None,
+    coverage_col: str = "coverage",
+    ylabel: str | None = None,
+    title: str | None = None,
     show: bool = True,
 ) -> tuple[plt.Figure, plt.Axes]:
     """Plot empirical CI coverage by budget and estimator."""
 
     set_theme_bw()
+    if coverage_col not in df.columns:
+        raise ValueError(f"Coverage column not found: {coverage_col}")
+    if ylabel is None:
+        ylabel = coverage_col.replace("_", " ")
     methods = _ordered_methods(df)
     plot_df = df[df["estimator"].isin(methods)].copy()
     summary = (
-        plot_df.groupby([HUMAN_N_COL, "estimator"], observed=True)["coverage"]
+        plot_df.groupby([HUMAN_N_COL, "estimator"], observed=True)[coverage_col]
         .mean()
         .reset_index()
     )
@@ -211,7 +218,7 @@ def plot_coverage(
             continue
         ax.plot(
             sub[HUMAN_N_COL],
-            sub["coverage"],
+            sub[coverage_col],
             label=method,
             color=METHOD_COLORS[method],
             linestyle=METHOD_LINESTYLES[method],
@@ -221,7 +228,9 @@ def plot_coverage(
 
     ax.axhline(1 - alpha, color="#666666", linestyle="--", linewidth=1)
     ax.set_xlabel(HUMAN_N_COL)
-    ax.set_ylabel("coverage")
+    ax.set_ylabel(ylabel)
+    if title is not None:
+        ax.set_title(title)
     ax.set_ylim(0.0, 1.05)
     ax.legend(loc="best", ncol=2)
     _add_budget_fraction_ticks(ax, n_total)
@@ -229,6 +238,27 @@ def plot_coverage(
     fig.tight_layout()
     _save_show(fig, path, show)
     return fig, ax
+
+
+def plot_finite_population_coverage(
+    df: pd.DataFrame,
+    alpha: float,
+    path: str | Path | None = None,
+    n_total: int | None = None,
+    show: bool = True,
+) -> tuple[plt.Figure, plt.Axes]:
+    """Plot coverage using finite-population-calibrated intervals."""
+
+    return plot_coverage(
+        df,
+        alpha=alpha,
+        path=path,
+        n_total=n_total,
+        coverage_col="finite population coverage",
+        ylabel="finite-population calibrated coverage",
+        title="Coverage against fixed empirical population",
+        show=show,
+    )
 
 
 def plot_monte_carlo_variance(
@@ -293,6 +323,9 @@ def make_monte_carlo_variance_table(df: pd.DataFrame) -> pd.DataFrame:
         "interval_width_mean",
         "interval_width_variance",
         "coverage",
+        "finite_population_coverage",
+        "finite_population_interval_width",
+        "finite_population_variance_inflation",
     ]
     return summary[columns].sort_values([HUMAN_N_COL, "estimator"]).reset_index(drop=True)
 
@@ -366,10 +399,10 @@ def save_monte_carlo_variance_table(
     for col in numeric_cols:
         if col == HUMAN_N_COL:
             display_table[col] = display_table[col].map(lambda x: f"{x:.0f}")
+        elif col.endswith("coverage") or col == "coverage":
+            display_table[col] = display_table[col].map(lambda x: f"{x:.2f}")
         elif "variance" in col:
             display_table[col] = display_table[col].map(lambda x: f"{x:.3g}")
-        elif col == "coverage":
-            display_table[col] = display_table[col].map(lambda x: f"{x:.2f}")
         else:
             display_table[col] = display_table[col].map(lambda x: f"{x:.3f}")
 

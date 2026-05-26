@@ -26,6 +26,9 @@ MC_VARIANCE_TARGETS = {
     "lb": "lb",
     "ub": "ub",
     "interval width": "interval_width",
+    "finite population lb": "finite_population_lb",
+    "finite population ub": "finite_population_ub",
+    "finite population interval width": "finite_population_interval_width",
 }
 
 
@@ -38,6 +41,8 @@ class OddsRatioResult:
     lb: float
     ub: float
     variance: float
+    mu0_hat: float = np.nan
+    mu1_hat: float = np.nan
 
 
 def _as_array(x: Iterable[float]) -> np.ndarray:
@@ -303,6 +308,8 @@ def odds_ratio_estimate_ci(
         lb=float(np.exp(log_point - width_log)),
         ub=float(np.exp(log_point + width_log)),
         variance=float(variance),
+        mu0_hat=mu0_hat,
+        mu1_hat=mu1_hat,
     )
 
 
@@ -342,7 +349,15 @@ def classical_odds_ratio_estimate_ci(
         np.sum(y1_selected == 1),
     ]
     if any(count == 0 for count in counts):
-        return OddsRatioResult(float(np.exp(log_point)), float(log_point), np.nan, np.nan, np.nan)
+        return OddsRatioResult(
+            float(np.exp(log_point)),
+            float(log_point),
+            np.nan,
+            np.nan,
+            np.nan,
+            mu0_hat=mu0,
+            mu1_hat=mu1,
+        )
 
     selected_scale_variance = sum(1 / count for count in counts)
     variance = selected_scale_variance * total_n
@@ -353,7 +368,107 @@ def classical_odds_ratio_estimate_ci(
         lb=float(np.exp(log_point - width_log)),
         ub=float(np.exp(log_point + width_log)),
         variance=float(variance),
+        mu0_hat=mu0,
+        mu1_hat=mu1,
     )
+
+
+def finite_population_log_odds_variance(
+    y0: np.ndarray,
+    yhat0: np.ndarray,
+    y1: np.ndarray,
+    yhat1: np.ndarray,
+    probabilities0: np.ndarray,
+    probabilities1: np.ndarray,
+    selected0: np.ndarray,
+    selected1: np.ndarray,
+    lhat0: float = 1.0,
+    lhat1: float = 1.0,
+    mu0_hat: float | None = None,
+    mu1_hat: float | None = None,
+) -> float:
+    """Finite-population HT variance for a prediction-assisted log odds ratio.
+
+    This is the Appendix I.2 calibration: groupwise HT variances of
+    ``R_i = Y_i - a_i`` with ``a_i = lhat * Yhat_i`` are combined through the
+    Delta method. The returned variance is on the log-odds-ratio scale.
+    """
+
+    y0 = _as_array(y0)
+    y1 = _as_array(y1)
+    yhat0 = _as_array(yhat0)
+    yhat1 = _as_array(yhat1)
+    probabilities0 = _clip_probabilities(probabilities0)
+    probabilities1 = _clip_probabilities(probabilities1)
+    selected0 = np.asarray(selected0, dtype=bool)
+    selected1 = np.asarray(selected1, dtype=bool)
+
+    a0 = lhat0 * yhat0
+    a1 = lhat1 * yhat1
+    if mu0_hat is None:
+        mu0_hat = np.mean(a0 + selected0.astype(float) / probabilities0 * (y0 - a0))
+    if mu1_hat is None:
+        mu1_hat = np.mean(a1 + selected1.astype(float) / probabilities1 * (y1 - a1))
+    mu0_hat = _clip_mean(mu0_hat)
+    mu1_hat = _clip_mean(mu1_hat)
+
+    residual0 = y0 - a0
+    residual1 = y1 - a1
+    v0_ht = (
+        np.sum(selected0 * (1 - probabilities0) / (probabilities0**2) * residual0**2)
+        / (len(y0) ** 2)
+    )
+    v1_ht = (
+        np.sum(selected1 * (1 - probabilities1) / (probabilities1**2) * residual1**2)
+        / (len(y1) ** 2)
+    )
+
+    d0 = -1 / (mu0_hat * (1 - mu0_hat))
+    d1 = 1 / (mu1_hat * (1 - mu1_hat))
+    return float(d0**2 * v0_ht + d1**2 * v1_ht)
+
+
+def finite_population_classical_log_odds_variance(
+    y0: np.ndarray,
+    y1: np.ndarray,
+    probabilities0: np.ndarray,
+    probabilities1: np.ndarray,
+    selected0: np.ndarray,
+    selected1: np.ndarray,
+    mu0_hat: float | None = None,
+    mu1_hat: float | None = None,
+) -> float:
+    """Approximate finite-population variance for the classical sample-only CI."""
+
+    y0 = _as_array(y0)
+    y1 = _as_array(y1)
+    probabilities0 = _clip_probabilities(probabilities0)
+    probabilities1 = _clip_probabilities(probabilities1)
+    selected0 = np.asarray(selected0, dtype=bool)
+    selected1 = np.asarray(selected1, dtype=bool)
+
+    if mu0_hat is None:
+        mu0_hat = _clip_mean(np.mean(y0[selected0]))
+    else:
+        mu0_hat = _clip_mean(mu0_hat)
+    if mu1_hat is None:
+        mu1_hat = _clip_mean(np.mean(y1[selected1]))
+    else:
+        mu1_hat = _clip_mean(mu1_hat)
+
+    residual0 = y0 - mu0_hat
+    residual1 = y1 - mu1_hat
+    v0_ht = (
+        np.sum(selected0 * (1 - probabilities0) / (probabilities0**2) * residual0**2)
+        / (len(y0) ** 2)
+    )
+    v1_ht = (
+        np.sum(selected1 * (1 - probabilities1) / (probabilities1**2) * residual1**2)
+        / (len(y1) ** 2)
+    )
+    d0 = -1 / (mu0_hat * (1 - mu0_hat))
+    d1 = 1 / (mu1_hat * (1 - mu1_hat))
+    return float(d0**2 * v0_ht + d1**2 * v1_ht)
 
 
 def inverse_probability_weights(
@@ -394,10 +509,33 @@ def _result_row(
     n_human: int,
     frac_human: float,
     trial: int,
+    alpha: float,
     true_odds_ratio: float,
     true_variance: float,
     n: int,
+    finite_population_log_variance: float | None = None,
 ) -> dict:
+    z_value = norm.ppf(1 - alpha / 2)
+    if (
+        finite_population_log_variance is None
+        or not np.isfinite(finite_population_log_variance)
+        or finite_population_log_variance <= 0
+    ):
+        fp_log_width = np.nan
+        fp_lb = np.nan
+        fp_ub = np.nan
+        fp_coverage = np.nan
+        variance_inflation = np.nan
+        implied_usual_coverage = np.nan
+    else:
+        fp_log_width = z_value * np.sqrt(finite_population_log_variance)
+        fp_lb = float(np.exp(result.log_point_estimate - fp_log_width))
+        fp_ub = float(np.exp(result.log_point_estimate + fp_log_width))
+        fp_coverage = bool(fp_lb <= true_odds_ratio <= fp_ub)
+        usual_log_variance = result.variance / n
+        variance_inflation = float(usual_log_variance / finite_population_log_variance)
+        implied_usual_coverage = float(2 * norm.cdf(z_value * np.sqrt(variance_inflation)) - 1)
+
     return {
         "trial": trial,
         "frac_human": frac_human,
@@ -411,6 +549,16 @@ def _result_row(
         "interval width": result.ub - result.lb,
         "coverage": bool(result.lb <= true_odds_ratio <= result.ub),
         EFFECTIVE_N_COL: effective_sample_size(true_variance, result.variance, n),
+        "finite population log variance estimate": finite_population_log_variance,
+        "finite population scaled variance estimate": (
+            finite_population_log_variance * n if finite_population_log_variance is not None else np.nan
+        ),
+        "finite population lb": fp_lb,
+        "finite population ub": fp_ub,
+        "finite population interval width": fp_ub - fp_lb,
+        "finite population coverage": fp_coverage,
+        "finite population variance inflation": variance_inflation,
+        "implied usual finite population coverage": implied_usual_coverage,
     }
 
 
@@ -446,12 +594,21 @@ def monte_carlo_variance_table(
 ) -> pd.DataFrame:
     """Summarize empirical MC variance for estimates and interval quantities."""
 
-    missing_targets = [col for col in MC_VARIANCE_TARGETS if col not in df.columns]
+    out = df.copy()
+    required_targets = ["point estimate", "lb", "ub", "interval width", "coverage"]
+    missing_targets = [col for col in required_targets if col not in out.columns]
     if missing_targets:
         raise ValueError(f"Missing columns required for MC variance summary: {missing_targets}")
+    for optional_col in [
+        "finite population coverage",
+        "finite population interval width",
+        "finite population variance inflation",
+    ]:
+        if optional_col not in out.columns:
+            out[optional_col] = np.nan
 
     summary = (
-        df.groupby(list(group_cols), observed=True)
+        out.groupby(list(group_cols), observed=True)
         .agg(
             point_estimate_mean=("point estimate", "mean"),
             point_estimate_variance=("point estimate", "var"),
@@ -462,6 +619,9 @@ def monte_carlo_variance_table(
             interval_width_mean=("interval width", "mean"),
             interval_width_variance=("interval width", "var"),
             coverage=("coverage", "mean"),
+            finite_population_coverage=("finite population coverage", "mean"),
+            finite_population_interval_width=("finite population interval width", "mean"),
+            finite_population_variance_inflation=("finite population variance inflation", "mean"),
         )
         .reset_index()
     )
@@ -474,8 +634,18 @@ def summarize_monte_carlo(
 ) -> pd.DataFrame:
     """One-row-per-method summary of CI performance and MC stability."""
 
+    out = df.copy()
+    for optional_col in [
+        "finite population coverage",
+        "finite population interval width",
+        "finite population variance inflation",
+        "finite population log variance estimate",
+    ]:
+        if optional_col not in out.columns:
+            out[optional_col] = np.nan
+
     summary = (
-        df.groupby(list(group_cols), observed=True)
+        out.groupby(list(group_cols), observed=True)
         .agg(
             point_estimate_mean=("point estimate", "mean"),
             point_estimate_var=("point estimate", "var"),
@@ -487,8 +657,12 @@ def summarize_monte_carlo(
             ub_var=("ub", "var"),
             interval_width_var=("interval width", "var"),
             coverage=("coverage", "mean"),
+            finite_population_coverage=("finite population coverage", "mean"),
+            finite_population_interval_width=("finite population interval width", "mean"),
+            finite_population_variance_inflation=("finite population variance inflation", "mean"),
             interval_width=("interval width", "mean"),
             variance_estimate=("variance estimate", "mean"),
+            finite_population_log_variance_estimate=("finite population log variance estimate", "mean"),
             effective_n=(EFFECTIVE_N_COL, "mean"),
         )
         .reset_index()
@@ -570,87 +744,162 @@ def run_odds_ratio_monte_carlo(
             trial_iterator = tqdm(trial_iterator, desc=f"trials {frac_human:.3f}", leave=False)
 
         for trial in trial_iterator:
-            _, weights_active0 = inverse_probability_weights(p0_active, rng)
-            _, weights_active1 = inverse_probability_weights(p1_active, rng)
+            selected_active0, weights_active0 = inverse_probability_weights(p0_active, rng)
+            selected_active1, weights_active1 = inverse_probability_weights(p1_active, rng)
             active_ratio0 = (1 - p0_active) / p0_active
             active_ratio1 = (1 - p1_active) / p1_active
             lam0_active = opt_mean_tuning(y0, yhat0, weights_active0, active_ratio0)
             lam1_active = opt_mean_tuning(y1, yhat1, weights_active1, active_ratio1)
 
-            _, weights_spline0 = inverse_probability_weights(p0_spline, rng)
-            _, weights_spline1 = inverse_probability_weights(p1_spline, rng)
+            selected_spline0, weights_spline0 = inverse_probability_weights(p0_spline, rng)
+            selected_spline1, weights_spline1 = inverse_probability_weights(p1_spline, rng)
             spline_ratio0 = (1 - p0_spline) / p0_spline
             spline_ratio1 = (1 - p1_spline) / p1_spline
             lam0_spline = opt_mean_tuning(y0, yhat0, weights_spline0, spline_ratio0)
             lam1_spline = opt_mean_tuning(y1, yhat1, weights_spline1, spline_ratio1)
 
+            active_result = odds_ratio_estimate_ci(
+                y0, yhat0, y1, yhat1, weights_active0, weights_active1, alpha
+            )
+            active_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                p0_active,
+                p1_active,
+                selected_active0,
+                selected_active1,
+                lhat0=1,
+                lhat1=1,
+                mu0_hat=active_result.mu0_hat,
+                mu1_hat=active_result.mu1_hat,
+            )
+
+            spline_result = odds_ratio_estimate_ci(
+                y0, yhat0, y1, yhat1, weights_spline0, weights_spline1, alpha
+            )
+            spline_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                p0_spline,
+                p1_spline,
+                selected_spline0,
+                selected_spline1,
+                lhat0=1,
+                lhat1=1,
+                mu0_hat=spline_result.mu0_hat,
+                mu1_hat=spline_result.mu1_hat,
+            )
+
+            active_tuned_result = odds_ratio_estimate_ci(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                weights_active0,
+                weights_active1,
+                alpha,
+                lhat0=lam0_active,
+                lhat1=lam1_active,
+            )
+            active_tuned_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                p0_active,
+                p1_active,
+                selected_active0,
+                selected_active1,
+                lhat0=lam0_active,
+                lhat1=lam1_active,
+                mu0_hat=active_tuned_result.mu0_hat,
+                mu1_hat=active_tuned_result.mu1_hat,
+            )
+
+            spline_tuned_result = odds_ratio_estimate_ci(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                weights_spline0,
+                weights_spline1,
+                alpha,
+                lhat0=lam0_spline,
+                lhat1=lam1_spline,
+            )
+            spline_tuned_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                p0_spline,
+                p1_spline,
+                selected_spline0,
+                selected_spline1,
+                lhat0=lam0_spline,
+                lhat1=lam1_spline,
+                mu0_hat=spline_tuned_result.mu0_hat,
+                mu1_hat=spline_tuned_result.mu1_hat,
+            )
+
             method_results = [
-                (
-                    "active",
-                    odds_ratio_estimate_ci(
-                        y0, yhat0, y1, yhat1, weights_active0, weights_active1, alpha
-                    ),
-                ),
-                (
-                    "spline",
-                    odds_ratio_estimate_ci(
-                        y0, yhat0, y1, yhat1, weights_spline0, weights_spline1, alpha
-                    ),
-                ),
-                (
-                    "active + tuning",
-                    odds_ratio_estimate_ci(
-                        y0,
-                        yhat0,
-                        y1,
-                        yhat1,
-                        weights_active0,
-                        weights_active1,
-                        alpha,
-                        lhat0=lam0_active,
-                        lhat1=lam1_active,
-                    ),
-                ),
-                (
-                    "spline + tuning",
-                    odds_ratio_estimate_ci(
-                        y0,
-                        yhat0,
-                        y1,
-                        yhat1,
-                        weights_spline0,
-                        weights_spline1,
-                        alpha,
-                        lhat0=lam0_spline,
-                        lhat1=lam1_spline,
-                    ),
-                ),
+                ("active", active_result, active_fp_var),
+                ("spline", spline_result, spline_fp_var),
+                ("active + tuning", active_tuned_result, active_tuned_fp_var),
+                ("spline + tuning", spline_tuned_result, spline_tuned_fp_var),
             ]
 
+            p0_uniform = np.full(n0, frac_human)
+            p1_uniform = np.full(n1, frac_human)
             selected0_uniform, weights_uniform0 = inverse_probability_weights(
-                np.full(n0, frac_human), rng
+                p0_uniform, rng
             )
             selected1_uniform, weights_uniform1 = inverse_probability_weights(
-                np.full(n1, frac_human), rng
+                p1_uniform, rng
+            )
+            uniform_result = odds_ratio_estimate_ci(
+                y0, yhat0, y1, yhat1, weights_uniform0, weights_uniform1, alpha
+            )
+            uniform_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                p0_uniform,
+                p1_uniform,
+                selected0_uniform,
+                selected1_uniform,
+                lhat0=1,
+                lhat1=1,
+                mu0_hat=uniform_result.mu0_hat,
+                mu1_hat=uniform_result.mu1_hat,
             )
             method_results.append(
-                (
-                    "uniform",
-                    odds_ratio_estimate_ci(
-                        y0, yhat0, y1, yhat1, weights_uniform0, weights_uniform1, alpha
-                    ),
-                )
-            )
-            method_results.append(
-                (
-                    "classical",
-                    classical_odds_ratio_estimate_ci(
-                        y0, y1, selected0_uniform, selected1_uniform, alpha, total_n=n
-                    ),
-                )
+                ("uniform", uniform_result, uniform_fp_var)
             )
 
-            for estimator, result in method_results:
+            classical_result = classical_odds_ratio_estimate_ci(
+                y0, y1, selected0_uniform, selected1_uniform, alpha, total_n=n
+            )
+            classical_fp_var = finite_population_classical_log_odds_variance(
+                y0,
+                y1,
+                p0_uniform,
+                p1_uniform,
+                selected0_uniform,
+                selected1_uniform,
+                mu0_hat=classical_result.mu0_hat,
+                mu1_hat=classical_result.mu1_hat,
+            )
+            method_results.append(
+                ("classical", classical_result, classical_fp_var)
+            )
+
+            for estimator, result, finite_population_log_variance in method_results:
                 rows.append(
                     _result_row(
                         result,
@@ -658,9 +907,11 @@ def run_odds_ratio_monte_carlo(
                         n_human,
                         frac_human,
                         trial,
+                        alpha,
                         true_odds_ratio,
                         true_variance,
                         n,
+                        finite_population_log_variance=finite_population_log_variance,
                     )
                 )
 

@@ -12,6 +12,11 @@ The BRCA example is in `BRCA/`.
 - `BRCA/plotting.py`: shared plotting helpers with a ggplot2 `theme_bw`-style look.
 - `Data/BRCA/`: compact tabular inputs used by the notebook.
 
+The BRCA Monte Carlo output includes both the usual superpopulation-style Wald
+coverage and the finite-population-calibrated coverage used for evaluation
+against the fixed empirical population, following the paper's Appendix I.2
+calibration.
+
 Run notebooks from the `BRCA/` directory so relative paths resolve.
 
 ## Setup
