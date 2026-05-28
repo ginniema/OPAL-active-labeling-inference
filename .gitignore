@@ -22,6 +22,10 @@ Stance/plots/*
 !Stance/plots/.gitkeep
 Stance/results/*
 !Stance/results/.gitkeep
+Simulation/plots/*
+!Simulation/plots/.gitkeep
+Simulation/results/*
+!Simulation/results/.gitkeep
 
 # Large local/raw medical imaging artifacts should stay out of the paper repo.
 *.dcm

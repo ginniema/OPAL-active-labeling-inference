@@ -502,6 +502,85 @@ def active_sampling_probabilities(
     return np.clip((1 - tau) * base_probs + tau * target_mean_probability, 0, 1)
 
 
+class _BinnedResidualRegressor:
+    """Fast one-dimensional smoother used by sequential examples."""
+
+    def __init__(self, n_bins: int = 12):
+        self.n_bins = n_bins
+        self.edges_: np.ndarray | None = None
+        self.values_: np.ndarray | None = None
+        self.global_mean_: float = np.nan
+
+    def fit(self, x: np.ndarray, y: np.ndarray) -> "_BinnedResidualRegressor":
+        x = np.asarray(x, dtype=float)
+        if x.ndim > 1:
+            x = x[:, 0]
+        y = _as_array(y)
+        self.global_mean_ = float(np.mean(y)) if len(y) else 0.0
+        if len(np.unique(x)) <= 1:
+            self.edges_ = np.array([])
+            self.values_ = np.array([self.global_mean_])
+            return self
+
+        quantiles = np.linspace(0, 1, self.n_bins + 1)
+        edges = np.unique(np.quantile(x, quantiles))
+        if len(edges) <= 2:
+            self.edges_ = np.array([])
+            self.values_ = np.array([self.global_mean_])
+            return self
+
+        bin_ids = np.clip(np.searchsorted(edges[1:-1], x, side="right"), 0, len(edges) - 2)
+        values = np.full(len(edges) - 1, self.global_mean_)
+        for bin_id in range(len(values)):
+            in_bin = bin_ids == bin_id
+            if np.any(in_bin):
+                values[bin_id] = float(np.mean(y[in_bin]))
+        self.edges_ = edges
+        self.values_ = values
+        return self
+
+    def predict(self, x: np.ndarray) -> np.ndarray:
+        if self.values_ is None:
+            raise RuntimeError("Binned residual regressor has not been fit.")
+        x = np.asarray(x, dtype=float)
+        if x.ndim > 1:
+            x = x[:, 0]
+        if self.edges_ is None or len(self.edges_) == 0:
+            return np.full(len(x), self.values_[0])
+        bin_ids = np.clip(np.searchsorted(self.edges_[1:-1], x, side="right"), 0, len(self.values_) - 1)
+        return self.values_[bin_ids]
+
+
+def _fit_residual_uncertainty_model(
+    features: np.ndarray,
+    residuals: np.ndarray,
+    *,
+    model: Literal["binned", "gradient_boosting"] = "binned",
+    seed: int | None = None,
+    n_bins: int = 12,
+):
+    features = np.asarray(features, dtype=float)
+    residuals = _as_array(residuals)
+    if model == "binned":
+        return _BinnedResidualRegressor(n_bins=n_bins).fit(features, residuals)
+    if model == "gradient_boosting":
+        from sklearn.ensemble import GradientBoostingRegressor
+
+        fit_model = GradientBoostingRegressor(
+            random_state=seed,
+            max_depth=2,
+            n_estimators=100,
+        )
+        fit_model.fit(features, residuals)
+        return fit_model
+    raise ValueError("model must be one of: 'binned', 'gradient_boosting'")
+
+
+def _predict_residual_uncertainty(model, features: np.ndarray) -> np.ndarray:
+    predictions = np.asarray(model.predict(np.asarray(features, dtype=float)), dtype=float)
+    return np.sqrt(np.maximum(predictions, 1e-8))
+
+
 def binary_odds_ratio_truth(y0: np.ndarray, y1: np.ndarray) -> tuple[float, float]:
     """Return the empirical odds ratio and scaled classical log-OR variance."""
 
@@ -978,5 +1057,356 @@ def run_odds_ratio_monte_carlo(
                         finite_population_log_variance=finite_population_log_variance,
                     )
                 )
+
+    return add_monte_carlo_variance(pd.DataFrame(rows))
+
+
+def run_sequential_odds_ratio_monte_carlo(
+    y: np.ndarray,
+    yhat: np.ndarray,
+    group1: np.ndarray,
+    uncertainty_features: np.ndarray,
+    fracs_human: Iterable[float],
+    alpha: float,
+    num_trials: int,
+    true_odds_ratio: float | None = None,
+    true_variance: float | None = None,
+    burnin_steps: int = 50,
+    retrain_steps: int = 250,
+    tau: float = 0.1,
+    seed: int | None = None,
+    num_knots: int = 5,
+    degree: int = 3,
+    uncertainty_model: Literal["binned", "gradient_boosting"] = "binned",
+    uncertainty_bins: int = 12,
+    show_progress: bool = True,
+) -> pd.DataFrame:
+    """Run a sequential active-labeling odds-ratio Monte Carlo comparison.
+
+    Unlike the archived sequential CSVs, this runner computes the exact
+    finite-population calibration inside each replicate while the selected
+    labels and their first-order sampling probabilities are still available.
+    """
+
+    y = _as_array(y)
+    yhat = _clip_probabilities(yhat)
+    group1 = np.asarray(group1, dtype=bool)
+    uncertainty_features = np.asarray(uncertainty_features, dtype=float)
+    if uncertainty_features.ndim == 1:
+        uncertainty_features = uncertainty_features.reshape(-1, 1)
+
+    if not (len(y) == len(yhat) == len(group1) == len(uncertainty_features)):
+        raise ValueError("y, yhat, group1, and uncertainty_features must have the same length")
+    if burnin_steps <= 0:
+        raise ValueError("burnin_steps must be positive")
+    if retrain_steps <= 0:
+        raise ValueError("retrain_steps must be positive")
+    if burnin_steps >= len(y):
+        raise ValueError("burnin_steps must be smaller than the population size")
+
+    y0, y1 = y[~group1], y[group1]
+    yhat0, yhat1 = yhat[~group1], yhat[group1]
+    n0 = len(y0)
+    n1 = len(y1)
+    n = len(y)
+    if n0 == 0 or n1 == 0:
+        raise ValueError("Both groups must contain observations")
+
+    if true_odds_ratio is None or true_variance is None:
+        computed_odds_ratio, computed_variance = binary_odds_ratio_truth(y0, y1)
+        if true_odds_ratio is None:
+            true_odds_ratio = computed_odds_ratio
+        if true_variance is None:
+            true_variance = computed_variance
+
+    mu0_init = _clip_mean(np.mean(y0[: min(burnin_steps, n0)]))
+    mu1_init = _clip_mean(np.mean(y1[: min(burnin_steps, n1)]))
+    residuals = (y - yhat) ** 2
+    base_seed = 0 if seed is None else int(seed)
+
+    iterator = list(fracs_human)
+    if show_progress:
+        from tqdm.auto import tqdm
+
+        iterator = tqdm(iterator, desc="sequential human budget")
+
+    rows = []
+    for budget_index, frac_human in enumerate(iterator):
+        frac_human = float(frac_human)
+        n_human = int(frac_human * n)
+        remaining_expected_budget = n * frac_human - burnin_steps
+        if remaining_expected_budget <= 0:
+            raise ValueError("Each budget must exceed burnin_steps / n")
+        frac_human_adjusted = remaining_expected_budget / (n - burnin_steps)
+
+        trial_iterator = range(num_trials)
+        if show_progress:
+            from tqdm.auto import tqdm
+
+            trial_iterator = tqdm(
+                trial_iterator,
+                desc=f"sequential trials {frac_human:.3f}",
+                leave=False,
+            )
+
+        for trial in trial_iterator:
+            seed_sequence = np.random.SeedSequence([base_seed, budget_index, trial])
+            rng = np.random.default_rng(seed_sequence)
+
+            selected_active = np.zeros(n, dtype=bool)
+            selected_spline = np.zeros(n, dtype=bool)
+            probabilities_active = np.ones(n)
+            probabilities_spline = np.ones(n)
+            weights_active = np.zeros(n)
+            weights_spline = np.zeros(n)
+
+            selected_active[:burnin_steps] = True
+            selected_spline[:burnin_steps] = True
+            weights_active[:burnin_steps] = 1.0
+            weights_spline[:burnin_steps] = 1.0
+
+            active_uncertainty = np.full(n, np.nan)
+            spline_probabilities_current = np.full(n, frac_human_adjusted)
+
+            for t in range(burnin_steps, n):
+                if (t - burnin_steps) % retrain_steps == 0:
+                    active_model = _fit_residual_uncertainty_model(
+                        uncertainty_features[selected_active],
+                        residuals[selected_active],
+                        model=uncertainty_model,
+                        seed=base_seed + trial,
+                        n_bins=uncertainty_bins,
+                    )
+                    active_uncertainty = _predict_residual_uncertainty(
+                        active_model,
+                        uncertainty_features,
+                    )
+
+                    spline_model = _fit_residual_uncertainty_model(
+                        uncertainty_features[selected_spline],
+                        residuals[selected_spline],
+                        model=uncertainty_model,
+                        seed=base_seed + trial,
+                        n_bins=uncertainty_bins,
+                    )
+                    spline_uncertainty = _predict_residual_uncertainty(
+                        spline_model,
+                        uncertainty_features,
+                    )
+                    p1_spline, p0_spline, _, _ = sampling_probs_spline_inv(
+                        spline_uncertainty[group1],
+                        spline_uncertainty[~group1],
+                        spline_uncertainty[group1],
+                        spline_uncertainty[~group1],
+                        mu1_init,
+                        mu0_init,
+                        remaining_expected_budget,
+                        num_knots=num_knots,
+                        degree=degree,
+                        split_budget_evenly=False,
+                    )
+                    if p0_spline is None or p1_spline is None:
+                        raise RuntimeError(
+                            f"Spline sampling optimization failed for frac_human={frac_human}, trial={trial}."
+                        )
+                    spline_probabilities_current[group1] = _clip_probabilities(p1_spline)
+                    spline_probabilities_current[~group1] = _clip_probabilities(p0_spline)
+
+                mean_uncertainty = float(np.mean(active_uncertainty))
+                if np.isclose(mean_uncertainty, 0) or not np.isfinite(mean_uncertainty):
+                    active_probability = frac_human_adjusted
+                else:
+                    active_probability = active_uncertainty[t] / mean_uncertainty * frac_human_adjusted
+                active_probability = float(
+                    np.clip(
+                        (1 - tau) * active_probability + tau * frac_human_adjusted,
+                        1e-10,
+                        1.0,
+                    )
+                )
+                spline_probability = float(np.clip(spline_probabilities_current[t], 1e-10, 1.0))
+
+                probabilities_active[t] = active_probability
+                probabilities_spline[t] = spline_probability
+                selected_active[t] = bool(rng.binomial(1, active_probability))
+                selected_spline[t] = bool(rng.binomial(1, spline_probability))
+                weights_active[t] = selected_active[t] / active_probability
+                weights_spline[t] = selected_spline[t] / spline_probability
+
+            weights_active0 = weights_active[~group1]
+            weights_active1 = weights_active[group1]
+            weights_spline0 = weights_spline[~group1]
+            weights_spline1 = weights_spline[group1]
+            probabilities_active0 = probabilities_active[~group1]
+            probabilities_active1 = probabilities_active[group1]
+            probabilities_spline0 = probabilities_spline[~group1]
+            probabilities_spline1 = probabilities_spline[group1]
+            selected_active0 = selected_active[~group1]
+            selected_active1 = selected_active[group1]
+            selected_spline0 = selected_spline[~group1]
+            selected_spline1 = selected_spline[group1]
+            active_ratio0 = (1 - probabilities_active0) / probabilities_active0
+            active_ratio1 = (1 - probabilities_active1) / probabilities_active1
+            spline_ratio0 = (1 - probabilities_spline0) / probabilities_spline0
+            spline_ratio1 = (1 - probabilities_spline1) / probabilities_spline1
+
+            lam0_active = opt_mean_tuning(y0, yhat0, weights_active0, active_ratio0)
+            lam1_active = opt_mean_tuning(y1, yhat1, weights_active1, active_ratio1)
+            lam0_spline = opt_mean_tuning(y0, yhat0, weights_spline0, spline_ratio0)
+            lam1_spline = opt_mean_tuning(y1, yhat1, weights_spline1, spline_ratio1)
+
+            active_result = odds_ratio_estimate_ci(
+                y0, yhat0, y1, yhat1, weights_active0, weights_active1, alpha
+            )
+            active_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                probabilities_active0,
+                probabilities_active1,
+                selected_active0,
+                selected_active1,
+                lhat0=1,
+                lhat1=1,
+                mu0_hat=active_result.mu0_hat,
+                mu1_hat=active_result.mu1_hat,
+            )
+
+            active_tuned_result = odds_ratio_estimate_ci(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                weights_active0,
+                weights_active1,
+                alpha,
+                lhat0=lam0_active,
+                lhat1=lam1_active,
+            )
+            active_tuned_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                probabilities_active0,
+                probabilities_active1,
+                selected_active0,
+                selected_active1,
+                lhat0=lam0_active,
+                lhat1=lam1_active,
+                mu0_hat=active_tuned_result.mu0_hat,
+                mu1_hat=active_tuned_result.mu1_hat,
+            )
+
+            spline_result = odds_ratio_estimate_ci(
+                y0, yhat0, y1, yhat1, weights_spline0, weights_spline1, alpha
+            )
+            spline_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                probabilities_spline0,
+                probabilities_spline1,
+                selected_spline0,
+                selected_spline1,
+                lhat0=1,
+                lhat1=1,
+                mu0_hat=spline_result.mu0_hat,
+                mu1_hat=spline_result.mu1_hat,
+            )
+
+            spline_tuned_result = odds_ratio_estimate_ci(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                weights_spline0,
+                weights_spline1,
+                alpha,
+                lhat0=lam0_spline,
+                lhat1=lam1_spline,
+            )
+            spline_tuned_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                probabilities_spline0,
+                probabilities_spline1,
+                selected_spline0,
+                selected_spline1,
+                lhat0=lam0_spline,
+                lhat1=lam1_spline,
+                mu0_hat=spline_tuned_result.mu0_hat,
+                mu1_hat=spline_tuned_result.mu1_hat,
+            )
+
+            uniform_probabilities0 = np.full(n0, frac_human)
+            uniform_probabilities1 = np.full(n1, frac_human)
+            selected_uniform0 = rng.binomial(1, uniform_probabilities0).astype(bool)
+            selected_uniform1 = rng.binomial(1, uniform_probabilities1).astype(bool)
+            weights_uniform0 = selected_uniform0.astype(float) / uniform_probabilities0
+            weights_uniform1 = selected_uniform1.astype(float) / uniform_probabilities1
+
+            uniform_result = odds_ratio_estimate_ci(
+                y0, yhat0, y1, yhat1, weights_uniform0, weights_uniform1, alpha
+            )
+            uniform_fp_var = finite_population_log_odds_variance(
+                y0,
+                yhat0,
+                y1,
+                yhat1,
+                uniform_probabilities0,
+                uniform_probabilities1,
+                selected_uniform0,
+                selected_uniform1,
+                lhat0=1,
+                lhat1=1,
+                mu0_hat=uniform_result.mu0_hat,
+                mu1_hat=uniform_result.mu1_hat,
+            )
+
+            classical_result = classical_odds_ratio_estimate_ci(
+                y0, y1, selected_uniform0, selected_uniform1, alpha, total_n=n
+            )
+            classical_fp_var = finite_population_classical_log_odds_variance(
+                y0,
+                y1,
+                uniform_probabilities0,
+                uniform_probabilities1,
+                selected_uniform0,
+                selected_uniform1,
+                mu0_hat=classical_result.mu0_hat,
+                mu1_hat=classical_result.mu1_hat,
+            )
+
+            method_results = [
+                ("active", active_result, active_fp_var),
+                ("active + tuning", active_tuned_result, active_tuned_fp_var),
+                ("spline", spline_result, spline_fp_var),
+                ("spline + tuning", spline_tuned_result, spline_tuned_fp_var),
+                ("uniform", uniform_result, uniform_fp_var),
+                ("classical", classical_result, classical_fp_var),
+            ]
+            for estimator, result, finite_population_log_variance in method_results:
+                row = _result_row(
+                    result,
+                    estimator,
+                    n_human,
+                    frac_human,
+                    trial,
+                    alpha,
+                    true_odds_ratio,
+                    true_variance,
+                    n,
+                    finite_population_log_variance=finite_population_log_variance,
+                )
+                row["num_trial"] = trial
+                row["burnin_steps"] = burnin_steps
+                row["retrain_steps"] = retrain_steps
+                row["uncertainty_model"] = uncertainty_model
+                rows.append(row)
 
     return add_monte_carlo_variance(pd.DataFrame(rows))

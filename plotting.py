@@ -177,9 +177,10 @@ def make_effective_sample_size_multiplier(
 def _add_budget_fraction_ticks(ax: plt.Axes, n_total: int | None, y_offset: float = -0.12) -> None:
     if n_total is None:
         return
+    x_min, x_max = ax.get_xlim()
     ticks = ax.get_xticks()
     for tick in ticks:
-        if tick > 0:
+        if tick > 0 and x_min <= tick <= x_max:
             ax.text(
                 tick,
                 y_offset,
@@ -189,6 +190,12 @@ def _add_budget_fraction_ticks(ax: plt.Axes, n_total: int | None, y_offset: floa
                 va="top",
                 fontsize=9,
             )
+
+
+def _finish_budget_figure(fig: plt.Figure, n_total: int | None) -> None:
+    fig.tight_layout()
+    if n_total is not None:
+        fig.subplots_adjust(bottom=0.22)
 
 
 def plot_effective_sample_size(
@@ -276,9 +283,9 @@ def plot_effective_sample_size(
     ax.set_xlabel(HUMAN_N_COL)
     ax.set_ylabel(EFFECTIVE_N_COL)
     ax.legend(loc="best", ncol=2)
-    _add_budget_fraction_ticks(ax, n_total)
+    _add_budget_fraction_ticks(ax, n_total, y_offset=-0.18)
     _finish_axis(ax)
-    fig.tight_layout()
+    _finish_budget_figure(fig, n_total)
     _save_show(fig, path, show)
     return fig, ax
 
@@ -356,9 +363,9 @@ def plot_effective_sample_size_multiplier(
     ax.set_xlabel(HUMAN_N_COL)
     ax.set_ylabel(ESS_MULTIPLIER_COL)
     ax.legend(loc="best", ncol=2)
-    _add_budget_fraction_ticks(ax, n_total)
+    _add_budget_fraction_ticks(ax, n_total, y_offset=-0.18)
     _finish_axis(ax)
-    fig.tight_layout()
+    _finish_budget_figure(fig, n_total)
     _save_show(fig, path, show)
     return fig, ax
 
@@ -381,14 +388,45 @@ def plot_coverage(
     if ylabel is None:
         ylabel = coverage_col.replace("_", " ")
     methods = _ordered_methods(df)
+    summary = _coverage_summary(df, coverage_col, methods)
+
+    fig, ax = plt.subplots(figsize=(7, 4.8))
+    _draw_coverage_panel(ax, summary, methods, coverage_col, alpha)
+    ax.set_xlabel(HUMAN_N_COL)
+    ax.set_ylabel(ylabel)
+    if title is not None:
+        ax.set_title(title)
+    ax.legend(loc="best", ncol=2)
+    _add_budget_fraction_ticks(ax, n_total, y_offset=-0.18)
+    _finish_axis(ax)
+    _finish_budget_figure(fig, n_total)
+    _save_show(fig, path, show)
+    return fig, ax
+
+
+def _coverage_summary(
+    df: pd.DataFrame,
+    coverage_col: str,
+    methods: list[str],
+) -> pd.DataFrame:
     plot_df = df[df["estimator"].isin(methods)].copy()
-    summary = (
+    return (
         plot_df.groupby([HUMAN_N_COL, "estimator"], observed=True)[coverage_col]
         .mean()
         .reset_index()
     )
 
-    fig, ax = plt.subplots(figsize=(7, 4.8))
+
+def _draw_coverage_panel(
+    ax: plt.Axes,
+    summary: pd.DataFrame,
+    methods: list[str],
+    coverage_col: str,
+    alpha: float,
+    marker_size: float = 5.5,
+    line_width: float | None = None,
+    ylim: tuple[float, float] = (0.0, 1.05),
+) -> None:
     for method in methods:
         sub = summary[summary["estimator"] == method].sort_values(HUMAN_N_COL)
         if sub.empty:
@@ -400,21 +438,684 @@ def plot_coverage(
             color=METHOD_COLORS[method],
             linestyle=METHOD_LINESTYLES[method],
             marker=METHOD_MARKERS[method],
-            markersize=5.5,
+            markersize=marker_size,
+            linewidth=line_width,
         )
 
     ax.axhline(1 - alpha, color="#666666", linestyle="--", linewidth=1)
-    ax.set_xlabel(HUMAN_N_COL)
-    ax.set_ylabel(ylabel)
-    if title is not None:
-        ax.set_title(title)
-    ax.set_ylim(0.0, 1.05)
-    ax.legend(loc="best", ncol=2)
-    _add_budget_fraction_ticks(ax, n_total)
-    _finish_axis(ax)
-    fig.tight_layout()
+    ax.set_ylim(*ylim)
+
+
+def plot_coverage_comparison(
+    df: pd.DataFrame,
+    alpha: float,
+    path: str | Path | None = None,
+    n_total: int | None = None,
+    title: str = "CheXpert Coverage",
+    panel_titles: tuple[str, str] = (
+        "(a) Raw coverage",
+        "(b) Finite-population corrected coverage",
+    ),
+    figsize: tuple[float, float] = (7.2, 3.7),
+    ylim: tuple[float, float] = (0.75, 1.05),
+    show_fraction_ticks: bool = False,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot raw and finite-population-calibrated coverage in one figure."""
+
+    set_theme_bw(font_scale=0.88)
+    plt.rcParams.update(
+        {
+            "font.size": 10,
+            "axes.labelsize": 10,
+            "axes.titlesize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10,
+        }
+    )
+    methods = _ordered_methods(df)
+    panels = [
+        ("coverage", panel_titles[0]),
+        ("finite population coverage", panel_titles[1]),
+    ]
+    missing = [col for col, _ in panels if col not in df.columns]
+    if missing:
+        raise ValueError(f"Coverage columns not found: {missing}")
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize, sharey=True)
+    for ax, (coverage_col, panel_title) in zip(axes, panels):
+        summary = _coverage_summary(df, coverage_col, methods)
+        _draw_coverage_panel(
+            ax,
+            summary,
+            methods,
+            coverage_col,
+            alpha,
+            marker_size=3.6,
+            line_width=1.35,
+            ylim=ylim,
+        )
+        ax.set_xlabel(HUMAN_N_COL)
+        ax.set_title(panel_title, loc="left", fontweight="normal", pad=2)
+        tick_upper = min(ylim[1], 1.0)
+        ax.set_yticks(np.arange(ylim[0], tick_upper + 1e-9, 0.05))
+        ax.locator_params(axis="x", nbins=5)
+        if show_fraction_ticks:
+            _add_budget_fraction_ticks(ax, n_total, y_offset=-0.20)
+        _finish_axis(ax)
+    axes[0].set_ylabel("coverage")
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=METHOD_COLORS[method],
+            linestyle=METHOD_LINESTYLES[method],
+            marker=METHOD_MARKERS[method],
+            markersize=4.0,
+            linewidth=1.5,
+            label=_display_method_label(method),
+        )
+        for method in methods
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=3,
+        bbox_to_anchor=(0.5, 0.025),
+        columnspacing=1.4,
+        handlelength=1.8,
+        handletextpad=0.6,
+    )
+    fig.suptitle(title, y=0.94, fontsize=12.0, fontweight="normal")
+    fig.subplots_adjust(left=0.075, right=0.995, bottom=0.36, top=0.84, wspace=0.10)
     _save_show(fig, path, show)
-    return fig, ax
+    return fig, axes
+
+
+def plot_effective_sample_size_and_finite_population_coverage(
+    df: pd.DataFrame,
+    alpha: float,
+    path: str | Path | None = None,
+    n_total: int | None = None,
+    panel_titles: tuple[str, str] = (
+        "(a) Effective sample size",
+        "(b) Finite-population corrected coverage",
+    ),
+    figsize: tuple[float, float] = (7.2, 3.4),
+    coverage_ylim: tuple[float, float] = (0.75, 1.05),
+    show_fraction_ticks: bool = False,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot ESS and finite-population coverage side by side."""
+
+    set_theme_bw(font_scale=0.88)
+    plt.rcParams.update(
+        {
+            "font.size": 10,
+            "axes.labelsize": 10,
+            "axes.titlesize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10,
+        }
+    )
+    methods = _ordered_methods(df)
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+
+    ess_summary = (
+        df[df["estimator"].isin(methods)]
+        .groupby([HUMAN_N_COL, "estimator"], observed=True)[EFFECTIVE_N_COL]
+        .mean()
+        .reset_index()
+    )
+    for method in methods:
+        sub = ess_summary[ess_summary["estimator"] == method].sort_values(HUMAN_N_COL)
+        if sub.empty:
+            continue
+        axes[0].plot(
+            sub[HUMAN_N_COL],
+            sub[EFFECTIVE_N_COL],
+            label=_display_method_label(method),
+            color=METHOD_COLORS[method],
+            linestyle=METHOD_LINESTYLES[method],
+            marker=METHOD_MARKERS[method],
+            markersize=3.8,
+            linewidth=1.35,
+        )
+    axes[0].set_xlabel(HUMAN_N_COL)
+    axes[0].set_ylabel(EFFECTIVE_N_COL)
+    axes[0].set_title(panel_titles[0], loc="left", fontweight="normal", pad=2)
+    axes[0].locator_params(axis="x", nbins=5)
+    _finish_axis(axes[0])
+
+    coverage_col = "finite population coverage"
+    if coverage_col not in df.columns:
+        raise ValueError(f"Coverage column not found: {coverage_col}")
+    coverage_summary = _coverage_summary(df, coverage_col, methods)
+    _draw_coverage_panel(
+        axes[1],
+        coverage_summary,
+        methods,
+        coverage_col,
+        alpha,
+        marker_size=3.8,
+        line_width=1.35,
+        ylim=coverage_ylim,
+    )
+    axes[1].set_xlabel(HUMAN_N_COL)
+    axes[1].set_ylabel("coverage")
+    axes[1].set_title(panel_titles[1], loc="left", fontweight="normal", pad=2)
+    tick_upper = min(coverage_ylim[1], 1.0)
+    axes[1].set_yticks(np.arange(coverage_ylim[0], tick_upper + 1e-9, 0.05))
+    axes[1].locator_params(axis="x", nbins=5)
+    _finish_axis(axes[1])
+
+    if show_fraction_ticks:
+        for ax in axes:
+            _add_budget_fraction_ticks(ax, n_total, y_offset=-0.20)
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=METHOD_COLORS[method],
+            linestyle=METHOD_LINESTYLES[method],
+            marker=METHOD_MARKERS[method],
+            markersize=4.0,
+            linewidth=1.5,
+            label=_display_method_label(method),
+        )
+        for method in methods
+    ]
+    bottom = 0.38 if show_fraction_ticks else 0.32
+    legend_y = 0.02
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=3,
+        bbox_to_anchor=(0.5, legend_y),
+        columnspacing=1.4,
+        handlelength=1.8,
+        handletextpad=0.6,
+    )
+    fig.subplots_adjust(left=0.075, right=0.995, bottom=bottom, top=0.92, wspace=0.24)
+    _save_show(fig, path, show)
+    return fig, axes
+
+
+def plot_batch_sequential_effective_sample_size_and_finite_population_coverage(
+    batch_df: pd.DataFrame,
+    sequential_df: pd.DataFrame,
+    alpha: float,
+    path: str | Path | None = None,
+    n_total_batch: int | None = None,
+    n_total_sequential: int | None = None,
+    panel_titles: tuple[str, str, str, str] = (
+        "(a) Batch effective sample size",
+        "(b) Batch corrected coverage",
+        "(c) Sequential effective sample size",
+        "(d) Sequential corrected coverage",
+    ),
+    figsize: tuple[float, float] = (7.2, 6.25),
+    coverage_ylim: tuple[float, float] = (0.75, 1.05),
+    show_fraction_ticks: bool = False,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot batch and sequential ESS/corrected coverage in a four-panel figure."""
+
+    set_theme_bw(font_scale=0.88)
+    plt.rcParams.update(
+        {
+            "font.size": 10,
+            "axes.labelsize": 10,
+            "axes.titlesize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10,
+        }
+    )
+
+    methods = [
+        method
+        for method in METHOD_ORDER
+        if method in set(batch_df["estimator"].dropna().unique())
+        or method in set(sequential_df["estimator"].dropna().unique())
+    ]
+    coverage_col = "finite population coverage"
+    for name, frame in [("batch", batch_df), ("sequential", sequential_df)]:
+        missing = [
+            col
+            for col in [HUMAN_N_COL, "estimator", EFFECTIVE_N_COL, coverage_col]
+            if col not in frame.columns
+        ]
+        if missing:
+            raise ValueError(f"{name} data frame is missing required columns: {missing}")
+
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+    plot_specs = [
+        (batch_df, axes[0, 0], "ess", panel_titles[0]),
+        (batch_df, axes[0, 1], "coverage", panel_titles[1]),
+        (sequential_df, axes[1, 0], "ess", panel_titles[2]),
+        (sequential_df, axes[1, 1], "coverage", panel_titles[3]),
+    ]
+
+    ess_max = 0.0
+    for frame in [batch_df, sequential_df]:
+        summary = (
+            frame[frame["estimator"].isin(methods)]
+            .groupby([HUMAN_N_COL, "estimator"], observed=True)[EFFECTIVE_N_COL]
+            .mean()
+            .reset_index()
+        )
+        if not summary.empty:
+            ess_max = max(ess_max, float(summary[EFFECTIVE_N_COL].max()))
+
+    for frame, ax, panel_kind, panel_title in plot_specs:
+        if panel_kind == "ess":
+            summary = (
+                frame[frame["estimator"].isin(methods)]
+                .groupby([HUMAN_N_COL, "estimator"], observed=True)[EFFECTIVE_N_COL]
+                .mean()
+                .reset_index()
+            )
+            for method in methods:
+                sub = summary[summary["estimator"] == method].sort_values(HUMAN_N_COL)
+                if sub.empty:
+                    continue
+                ax.plot(
+                    sub[HUMAN_N_COL],
+                    sub[EFFECTIVE_N_COL],
+                    label=_display_method_label(method),
+                    color=METHOD_COLORS[method],
+                    linestyle=METHOD_LINESTYLES[method],
+                    marker=METHOD_MARKERS[method],
+                    markersize=3.4,
+                    linewidth=1.25,
+                )
+            if ess_max > 0:
+                ax.set_ylim(0, ess_max * 1.08)
+            ax.set_ylabel(EFFECTIVE_N_COL)
+        else:
+            summary = _coverage_summary(frame, coverage_col, methods)
+            _draw_coverage_panel(
+                ax,
+                summary,
+                methods,
+                coverage_col,
+                alpha,
+                marker_size=3.4,
+                line_width=1.25,
+                ylim=coverage_ylim,
+            )
+            tick_upper = min(coverage_ylim[1], 1.0)
+            ax.set_yticks(np.arange(coverage_ylim[0], tick_upper + 1e-9, 0.05))
+            ax.set_ylabel("coverage")
+
+        ax.set_xlabel(HUMAN_N_COL)
+        ax.set_title(panel_title, loc="left", fontweight="normal", pad=2)
+        ax.locator_params(axis="x", nbins=4)
+        _finish_axis(ax)
+
+    if show_fraction_ticks:
+        for ax in axes[0, :]:
+            _add_budget_fraction_ticks(ax, n_total_batch, y_offset=-0.22)
+        for ax in axes[1, :]:
+            _add_budget_fraction_ticks(ax, n_total_sequential, y_offset=-0.22)
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=METHOD_COLORS[method],
+            linestyle=METHOD_LINESTYLES[method],
+            marker=METHOD_MARKERS[method],
+            markersize=4.0,
+            linewidth=1.5,
+            label=_display_method_label(method),
+        )
+        for method in methods
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=3,
+        bbox_to_anchor=(0.5, 0.02),
+        columnspacing=1.4,
+        handlelength=1.8,
+        handletextpad=0.6,
+    )
+    fig.subplots_adjust(left=0.08, right=0.995, bottom=0.18, top=0.965, wspace=0.26, hspace=0.42)
+    _save_show(fig, path, show)
+    return fig, axes
+
+
+def plot_batch_sequential_effective_sample_size(
+    batch_df: pd.DataFrame,
+    sequential_df: pd.DataFrame,
+    path: str | Path | None = None,
+    n_total_batch: int | None = None,
+    n_total_sequential: int | None = None,
+    panel_titles: tuple[str, str] = (
+        "(a) Batch",
+        "(b) Sequential",
+    ),
+    figsize: tuple[float, float] = (7.2, 3.4),
+    show_fraction_ticks: bool = False,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot batch and sequential effective sample size side by side."""
+
+    set_theme_bw(font_scale=0.88)
+    plt.rcParams.update(
+        {
+            "font.size": 10,
+            "axes.labelsize": 10,
+            "axes.titlesize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10,
+        }
+    )
+    methods = [
+        method
+        for method in METHOD_ORDER
+        if method in set(batch_df["estimator"].dropna().unique())
+        or method in set(sequential_df["estimator"].dropna().unique())
+    ]
+    for name, frame in [("batch", batch_df), ("sequential", sequential_df)]:
+        missing = [
+            col
+            for col in [HUMAN_N_COL, "estimator", EFFECTIVE_N_COL]
+            if col not in frame.columns
+        ]
+        if missing:
+            raise ValueError(f"{name} data frame is missing required columns: {missing}")
+
+    summaries = []
+    ess_max = 0.0
+    for frame in [batch_df, sequential_df]:
+        summary = (
+            frame[frame["estimator"].isin(methods)]
+            .groupby([HUMAN_N_COL, "estimator"], observed=True)[EFFECTIVE_N_COL]
+            .mean()
+            .reset_index()
+        )
+        summaries.append(summary)
+        if not summary.empty:
+            ess_max = max(ess_max, float(summary[EFFECTIVE_N_COL].max()))
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize, sharey=True)
+    for ax, summary, panel_title in zip(axes, summaries, panel_titles):
+        for method in methods:
+            sub = summary[summary["estimator"] == method].sort_values(HUMAN_N_COL)
+            if sub.empty:
+                continue
+            ax.plot(
+                sub[HUMAN_N_COL],
+                sub[EFFECTIVE_N_COL],
+                label=_display_method_label(method),
+                color=METHOD_COLORS[method],
+                linestyle=METHOD_LINESTYLES[method],
+                marker=METHOD_MARKERS[method],
+                markersize=3.8,
+                linewidth=1.35,
+            )
+        if ess_max > 0:
+            ax.set_ylim(0, ess_max * 1.08)
+        ax.set_xlabel(HUMAN_N_COL)
+        ax.set_title(panel_title, loc="left", fontweight="normal", pad=2)
+        ax.locator_params(axis="x", nbins=4)
+        _finish_axis(ax)
+    axes[0].set_ylabel(EFFECTIVE_N_COL)
+
+    if show_fraction_ticks:
+        _add_budget_fraction_ticks(axes[0], n_total_batch, y_offset=-0.20)
+        _add_budget_fraction_ticks(axes[1], n_total_sequential, y_offset=-0.20)
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=METHOD_COLORS[method],
+            linestyle=METHOD_LINESTYLES[method],
+            marker=METHOD_MARKERS[method],
+            markersize=4.0,
+            linewidth=1.5,
+            label=_display_method_label(method),
+        )
+        for method in methods
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=3,
+        bbox_to_anchor=(0.5, 0.02),
+        columnspacing=1.4,
+        handlelength=1.8,
+        handletextpad=0.6,
+    )
+    bottom = 0.38 if show_fraction_ticks else 0.32
+    fig.subplots_adjust(left=0.075, right=0.995, bottom=bottom, top=0.91, wspace=0.10)
+    _save_show(fig, path, show)
+    return fig, axes
+
+
+def plot_batch_sequential_finite_population_coverage(
+    batch_df: pd.DataFrame,
+    sequential_df: pd.DataFrame,
+    alpha: float,
+    path: str | Path | None = None,
+    n_total_batch: int | None = None,
+    n_total_sequential: int | None = None,
+    panel_titles: tuple[str, str] = (
+        "(a) Batch",
+        "(b) Sequential",
+    ),
+    figsize: tuple[float, float] = (7.2, 3.4),
+    coverage_ylim: tuple[float, float] = (0.75, 1.05),
+    show_fraction_ticks: bool = False,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot batch and sequential finite-population corrected coverage."""
+
+    set_theme_bw(font_scale=0.88)
+    plt.rcParams.update(
+        {
+            "font.size": 10,
+            "axes.labelsize": 10,
+            "axes.titlesize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10,
+        }
+    )
+    methods = [
+        method
+        for method in METHOD_ORDER
+        if method in set(batch_df["estimator"].dropna().unique())
+        or method in set(sequential_df["estimator"].dropna().unique())
+    ]
+    coverage_col = "finite population coverage"
+    for name, frame in [("batch", batch_df), ("sequential", sequential_df)]:
+        missing = [
+            col
+            for col in [HUMAN_N_COL, "estimator", coverage_col]
+            if col not in frame.columns
+        ]
+        if missing:
+            raise ValueError(f"{name} data frame is missing required columns: {missing}")
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize, sharey=True)
+    for ax, frame, panel_title in zip(axes, [batch_df, sequential_df], panel_titles):
+        summary = _coverage_summary(frame, coverage_col, methods)
+        _draw_coverage_panel(
+            ax,
+            summary,
+            methods,
+            coverage_col,
+            alpha,
+            marker_size=3.8,
+            line_width=1.35,
+            ylim=coverage_ylim,
+        )
+        tick_upper = min(coverage_ylim[1], 1.0)
+        ax.set_yticks(np.arange(coverage_ylim[0], tick_upper + 1e-9, 0.05))
+        ax.set_xlabel(HUMAN_N_COL)
+        ax.set_title(panel_title, loc="left", fontweight="normal", pad=2)
+        ax.locator_params(axis="x", nbins=4)
+        _finish_axis(ax)
+    axes[0].set_ylabel("coverage")
+
+    if show_fraction_ticks:
+        _add_budget_fraction_ticks(axes[0], n_total_batch, y_offset=-0.20)
+        _add_budget_fraction_ticks(axes[1], n_total_sequential, y_offset=-0.20)
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=METHOD_COLORS[method],
+            linestyle=METHOD_LINESTYLES[method],
+            marker=METHOD_MARKERS[method],
+            markersize=4.0,
+            linewidth=1.5,
+            label=_display_method_label(method),
+        )
+        for method in methods
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=3,
+        bbox_to_anchor=(0.5, 0.02),
+        columnspacing=1.4,
+        handlelength=1.8,
+        handletextpad=0.6,
+    )
+    bottom = 0.38 if show_fraction_ticks else 0.32
+    fig.subplots_adjust(left=0.075, right=0.995, bottom=bottom, top=0.91, wspace=0.10)
+    _save_show(fig, path, show)
+    return fig, axes
+
+
+def plot_batch_sequential_coverage_comparison(
+    batch_df: pd.DataFrame,
+    sequential_df: pd.DataFrame,
+    alpha: float,
+    path: str | Path | None = None,
+    n_total_batch: int | None = None,
+    n_total_sequential: int | None = None,
+    panel_titles: tuple[str, str, str, str] = (
+        "(a) Batch raw coverage",
+        "(b) Batch corrected coverage",
+        "(c) Sequential raw coverage",
+        "(d) Sequential corrected coverage",
+    ),
+    figsize: tuple[float, float] = (7.2, 5.8),
+    coverage_ylim: tuple[float, float] = (0.75, 1.05),
+    show_fraction_ticks: bool = False,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot raw and finite-population corrected coverage for batch/sequential runs."""
+
+    set_theme_bw(font_scale=0.88)
+    plt.rcParams.update(
+        {
+            "font.size": 10,
+            "axes.labelsize": 10,
+            "axes.titlesize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10,
+        }
+    )
+    methods = [
+        method
+        for method in METHOD_ORDER
+        if method in set(batch_df["estimator"].dropna().unique())
+        or method in set(sequential_df["estimator"].dropna().unique())
+    ]
+    panels = [
+        (batch_df, "coverage", panel_titles[0], n_total_batch),
+        (batch_df, "finite population coverage", panel_titles[1], n_total_batch),
+        (sequential_df, "coverage", panel_titles[2], n_total_sequential),
+        (sequential_df, "finite population coverage", panel_titles[3], n_total_sequential),
+    ]
+    for name, frame in [("batch", batch_df), ("sequential", sequential_df)]:
+        missing = [
+            col
+            for col in [
+                HUMAN_N_COL,
+                "estimator",
+                "coverage",
+                "finite population coverage",
+            ]
+            if col not in frame.columns
+        ]
+        if missing:
+            raise ValueError(f"{name} data frame is missing required columns: {missing}")
+
+    fig, axes = plt.subplots(2, 2, figsize=figsize, sharey=True)
+    for index, (ax, (frame, coverage_col, panel_title, n_total)) in enumerate(
+        zip(axes.ravel(), panels)
+    ):
+        summary = _coverage_summary(frame, coverage_col, methods)
+        _draw_coverage_panel(
+            ax,
+            summary,
+            methods,
+            coverage_col,
+            alpha,
+            marker_size=3.6,
+            line_width=1.25,
+            ylim=coverage_ylim,
+        )
+        tick_upper = min(coverage_ylim[1], 1.0)
+        ax.set_yticks(np.arange(coverage_ylim[0], tick_upper + 1e-9, 0.05))
+        ax.set_xlabel(HUMAN_N_COL if index >= 2 else "")
+        ax.set_title(panel_title, loc="left", fontweight="normal", pad=2)
+        ax.locator_params(axis="x", nbins=4)
+        if show_fraction_ticks:
+            _add_budget_fraction_ticks(ax, n_total, y_offset=-0.23)
+        _finish_axis(ax)
+    axes[0, 0].set_ylabel("coverage")
+    axes[1, 0].set_ylabel("coverage")
+
+    handles = [
+        Line2D(
+            [0],
+            [0],
+            color=METHOD_COLORS[method],
+            linestyle=METHOD_LINESTYLES[method],
+            marker=METHOD_MARKERS[method],
+            markersize=4.0,
+            linewidth=1.5,
+            label=_display_method_label(method),
+        )
+        for method in methods
+    ]
+    fig.legend(
+        handles=handles,
+        loc="lower center",
+        ncol=3,
+        bbox_to_anchor=(0.5, 0.035),
+        columnspacing=1.4,
+        handlelength=1.8,
+        handletextpad=0.6,
+    )
+    bottom = 0.30 if show_fraction_ticks else 0.24
+    fig.subplots_adjust(
+        left=0.085,
+        right=0.995,
+        bottom=bottom,
+        top=0.965,
+        wspace=0.10,
+        hspace=0.45,
+    )
+    _save_show(fig, path, show)
+    return fig, axes
 
 
 def plot_finite_population_coverage(
@@ -586,6 +1287,151 @@ def plot_sequential_effective_sample_size_distribution(
     return fig, ax
 
 
+def plot_sequential_variance_components(
+    df: pd.DataFrame,
+    path: str | Path | None = None,
+    n_total: int | None = None,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot across-run sequential variance for estimates and interval pieces.
+
+    The plotted values are empirical variances across Monte Carlo replicates;
+    each panel uses a log-scaled y-axis.
+    """
+
+    set_theme_bw(font_scale=1.0)
+    methods = _ordered_methods(df)
+    components = [
+        ("log point estimate", "log estimate"),
+        ("point estimate", "estimate"),
+        ("lb", "left endpoint"),
+        ("ub", "right endpoint"),
+        ("interval width", "CI width"),
+        (EFFECTIVE_N_COL, "ESS"),
+    ]
+    missing = [col for col, _ in components if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns required for sequential variance plot: {missing}")
+
+    fig, axes = plt.subplots(2, 3, figsize=(13, 7.2), sharex=True)
+    axes_flat = axes.ravel()
+    for ax, (value_col, title) in zip(axes_flat, components):
+        summary = (
+            df[df["estimator"].isin(methods)]
+            .groupby([HUMAN_N_COL, "estimator"], observed=True)[value_col]
+            .var()
+            .reset_index(name="empirical_variance")
+        )
+        for method in methods:
+            sub = summary[summary["estimator"] == method].sort_values(HUMAN_N_COL)
+            if sub.empty:
+                continue
+            values = sub["empirical_variance"].mask(sub["empirical_variance"] <= 0)
+            ax.plot(
+                sub[HUMAN_N_COL],
+                values,
+                label=_display_method_label(method),
+                color=METHOD_COLORS[method],
+                linestyle=METHOD_LINESTYLES[method],
+                marker=METHOD_MARKERS[method],
+                markersize=4.6,
+            )
+        ax.set_title(f"Var({title})")
+        ax.set_xlabel(HUMAN_N_COL)
+        ax.set_ylabel("empirical variance")
+        ax.set_yscale("log")
+        _finish_axis(ax)
+
+    for ax in axes_flat[3:]:
+        _add_budget_fraction_ticks(ax, n_total, y_offset=-0.18)
+
+    handles, labels = axes_flat[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="upper center", ncol=3, bbox_to_anchor=(0.5, 1.02))
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
+    _save_show(fig, path, show)
+    return fig, axes
+
+
+def plot_sequential_endpoint_variance_components(
+    df: pd.DataFrame,
+    path: str | Path | None = None,
+    n_total: int | None = None,
+    panel_titles: tuple[str, str] = (
+        "(a) Var(left endpoint)",
+        "(b) Var(right endpoint)",
+    ),
+    figsize: tuple[float, float] = (7.2, 3.4),
+    show_fraction_ticks: bool = False,
+    show: bool = True,
+) -> tuple[plt.Figure, np.ndarray]:
+    """Plot sequential across-run variance for left and right CI endpoints."""
+
+    set_theme_bw(font_scale=0.88)
+    plt.rcParams.update(
+        {
+            "font.size": 10,
+            "axes.labelsize": 10,
+            "axes.titlesize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+            "legend.fontsize": 10,
+        }
+    )
+    methods = _ordered_methods(df)
+    components = [("lb", panel_titles[0]), ("ub", panel_titles[1])]
+    missing = [col for col, _ in components if col not in df.columns]
+    if missing:
+        raise ValueError(f"Missing columns required for sequential endpoint variance plot: {missing}")
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize, sharex=True)
+    for ax, (value_col, panel_title) in zip(axes, components):
+        summary = (
+            df[df["estimator"].isin(methods)]
+            .groupby([HUMAN_N_COL, "estimator"], observed=True)[value_col]
+            .var()
+            .reset_index(name="empirical_variance")
+        )
+        for method in methods:
+            sub = summary[summary["estimator"] == method].sort_values(HUMAN_N_COL)
+            if sub.empty:
+                continue
+            values = sub["empirical_variance"].mask(sub["empirical_variance"] <= 0)
+            ax.plot(
+                sub[HUMAN_N_COL],
+                values,
+                label=_display_method_label(method),
+                color=METHOD_COLORS[method],
+                linestyle=METHOD_LINESTYLES[method],
+                marker=METHOD_MARKERS[method],
+                markersize=3.8,
+                linewidth=1.35,
+            )
+        ax.set_xlabel(HUMAN_N_COL)
+        ax.set_ylabel("empirical variance")
+        ax.set_yscale("log")
+        ax.set_title(panel_title, loc="left", fontweight="normal", pad=2)
+        ax.locator_params(axis="x", nbins=4)
+        if show_fraction_ticks:
+            _add_budget_fraction_ticks(ax, n_total, y_offset=-0.20)
+        _finish_axis(ax)
+
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(
+        handles,
+        labels,
+        loc="lower center",
+        ncol=3,
+        bbox_to_anchor=(0.5, 0.02),
+        columnspacing=1.4,
+        handlelength=1.8,
+        handletextpad=0.6,
+    )
+    bottom = 0.38 if show_fraction_ticks else 0.32
+    fig.subplots_adjust(left=0.09, right=0.995, bottom=bottom, top=0.91, wspace=0.26)
+    _save_show(fig, path, show)
+    return fig, axes
+
+
 def plot_monte_carlo_variance(
     df: pd.DataFrame,
     path: str | Path | None = None,
@@ -625,9 +1471,9 @@ def plot_monte_carlo_variance(
     ax.set_ylabel(ylabel)
     ax.set_yscale("log")
     ax.legend(loc="best", ncol=2)
-    _add_budget_fraction_ticks(ax, n_total)
+    _add_budget_fraction_ticks(ax, n_total, y_offset=-0.18)
     _finish_axis(ax)
-    fig.tight_layout()
+    _finish_budget_figure(fig, n_total)
     _save_show(fig, path, show)
     return fig, ax
 
