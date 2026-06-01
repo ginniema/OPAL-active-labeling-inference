@@ -17,12 +17,12 @@ against the fixed empirical population, following the paper's Appendix I.2
 calibration.
 
 ## Additional Examples
-- `BRCA/BRCA_active_clean.ipynb`: cleaned BRCA TNBA workflow.
-- `CheXpert/CheXpert_active_clean.ipynb`: cleaned Cardiomegaly AP-vs-PA workflow.
-- `Alphafold/Alphafold_active_clean.ipynb`: cleaned phosphorylation-vs-nonphosphorylation workflow.
-- `Stance/Stance_active_clean.ipynb`: cleaned stance batch workflow.
-- `Stance/Stance_sequential_clean.ipynb`: cleaned sequential Stance stability workflow that reruns the sequential Monte Carlo and computes exact finite-population calibrated coverage during each replicate.
-- `Simulation/`: cleaned simulation appendix code for Kendall's tau and synthetic odds-ratio examples.
+- `BRCA/BRCA_active_clean.ipynb`: BRCA TNBA workflow.
+- `CheXpert/CheXpert_active_clean.ipynb`: Cardiomegaly AP-vs-PA workflow.
+- `Alphafold/Alphafold_active_clean.ipynb`: phosphorylation-vs-nonphosphorylation workflow.
+- `Stance/Stance_active_clean.ipynb`: stance batch workflow.
+- `Stance/Stance_sequential_clean.ipynb`: sequential Stance stability workflow that reruns the sequential Monte Carlo and computes exact finite-population calibrated coverage during each replicate.
+- `Simulation/`: simulation appendix code for Kendall's tau and synthetic odds-ratio examples.
 Data for all examples can be found in `Data/<name of example>`
 
 Result CSVs keep the original estimator IDs such
