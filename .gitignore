@@ -7,25 +7,15 @@ venv/
 
 # Generated outputs
 BRCA/plots/*
-!BRCA/plots/.gitkeep
 BRCA/results/*
-!BRCA/results/.gitkeep
 CheXpert/plots/*
-!CheXpert/plots/.gitkeep
 CheXpert/results/*
-!CheXpert/results/.gitkeep
 Alphafold/plots/*
-!Alphafold/plots/.gitkeep
 Alphafold/results/*
-!Alphafold/results/.gitkeep
 Stance/plots/*
-!Stance/plots/.gitkeep
 Stance/results/*
-!Stance/results/.gitkeep
 Simulation/plots/*
-!Simulation/plots/.gitkeep
 Simulation/results/*
-!Simulation/results/.gitkeep
 
 # Large local/raw medical imaging artifacts should stay out of the paper repo.
 *.dcm
