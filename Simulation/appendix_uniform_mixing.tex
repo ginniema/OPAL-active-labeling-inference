@@ -1,0 +1,31 @@
+\subsubsection{Mixing with uniform}
+\label{app:mixing}
+
+We also considered a simple data-driven way to mix an adaptive sampling rule with uniform sampling.  Let
+\(\pi_m(x)\) denote the sampling probability produced by method \(m\), where \(m\) is either active uncertainty sampling or OPAL, and let \(\pi_{\mathrm{unif}}(x)\) denote the uniform policy with the same expected labeling budget.  For a grid of values \(\lambda \in [0,1]\), we formed
+\[
+    \pi_{m,\lambda}(x)
+    =
+    \lambda \pi_m(x) + (1-\lambda)\pi_{\mathrm{unif}}(x),
+\]
+with probabilities renormalized to preserve the target expected number of labels.  Under this convention, \(\lambda=1\) gives the original adaptive method and \(\lambda=0\) gives pure uniform sampling.
+
+For each budget, we selected \(\lambda\) using the labeled pilot sample.  Specifically, for each candidate value of \(\lambda\), we repeatedly simulated Bernoulli label acquisition from \(\pi_{m,\lambda}\) on the pilot sample and computed the prediction-assisted log odds-ratio estimate.  The tuning criterion was the empirical Monte Carlo variance of this log-scale estimate; equivalently, under the usual Wald approximation this targets the same variance term that determines the confidence interval width.  We then chose
+\[
+    \lambda_m^*
+    =
+    \arg\min_{\lambda}
+    \widehat{\mathrm{Var}}_{\mathrm{MC}}\{\hat\theta_{\lambda,m}\},
+\]
+where the expectation is approximated by Monte Carlo simulation over the label-acquisition step.  This tuning rule is intended as a proof of concept: it uses a labeled sample to estimate which amount of uniform exploration would have produced the most stable interval widths at the given budget.
+
+Figure~\ref{fig:sim-lambdatune} shows the selected \(\lambda_m^*\) values across budgets.  OPAL typically selects \(\lambda^*=1\), meaning that the estimated optimum is the unmixed OPAL policy.  In contrast, active uncertainty sampling often selects smaller and budget-dependent values of \(\lambda\), indicating that adding uniform sampling can improve stability.  This behavior is expected because uncertainty sampling can concentrate labels in a narrow region of the score distribution, which can create large inverse-probability weights for observations outside that region.  Uniform mixing raises the low sampling probabilities and can reduce the resulting Monte Carlo variability.
+
+The main limitation is that the selected \(\lambda\) depends on the pilot sample and on the number of Monte Carlo repetitions used in the tuning step.  With a small or unrepresentative pilot sample, the estimated interval widths can be noisy and the chosen \(\lambda\) can overfit the pilot distribution.  Uniform mixing can also be inefficient when the variance-optimal policy is genuinely highly nonuniform, because it spends part of the budget on observations with low influence.  For this reason, we view this experiment primarily as a diagnostic showing that active sampling may require explicit exploration, whereas OPAL is already more stable in this setting.
+
+\begin{figure}[t]
+    \centering
+    % \includegraphics[width=0.55\linewidth]{figures/uniform_mixing_lambda.pdf}
+    \caption{Optimal mixing weight with uniform sampling in the odds-ratio simulation.  For each budget and each base method, \(\lambda^*\) is selected by minimizing the empirical Monte Carlo variance of the prediction-assisted log odds-ratio estimate on the labeled pilot sample.  The convention is \(\lambda=1\) for the unmixed method and \(\lambda=0\) for pure uniform sampling.}
+    \label{fig:sim-lambdatune}
+\end{figure}

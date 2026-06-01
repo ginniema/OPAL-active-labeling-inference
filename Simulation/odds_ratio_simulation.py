@@ -38,7 +38,7 @@ from utils import (
 
 
 ProbabilitySource = Literal["oracle", "estimated"]
-GroupSplit = Literal["20_80", "balanced"]
+GroupSplit = Literal["20_80", "extreme", "balanced"]
 
 
 @dataclass(frozen=True)
@@ -53,7 +53,12 @@ class OddsRatioSimulationCase:
 
     @property
     def panel_label(self) -> str:
-        split_label = "20/80 split" if self.group_split == "20_80" else "50/50 split"
+        split_labels = {
+            "20_80": "20/80 split",
+            "extreme": "95/5 split",
+            "balanced": "50/50 split",
+        }
+        split_label = split_labels[self.group_split]
         source_label = "oracle probabilities" if self.probability_source == "oracle" else "estimated probabilities"
         return f"{split_label}, {source_label}"
 
@@ -70,7 +75,7 @@ class OddsRatioRunConfig:
     fracs_human_max: float = 0.20
     fracs_human_count: int = 20
     active_budget: Literal["proportional", "even"] = "proportional"
-    split_spline_budget_evenly: bool = True
+    split_spline_budget_evenly: bool = False
     show_progress: bool = True
 
     @property
@@ -213,6 +218,7 @@ def run_case(
 def default_cases(group: str, probability_source: str) -> list[OddsRatioSimulationCase]:
     groups = {
         "20_80": OddsRatioSimulationCase("20_80", "estimated", 0.8),
+        "extreme": OddsRatioSimulationCase("extreme", "estimated", 0.95),
         "balanced": OddsRatioSimulationCase("balanced", "estimated", 0.5),
     }
     selected_groups = list(groups) if group == "all" else [group]
@@ -242,13 +248,13 @@ def write_case_outputs(df: pd.DataFrame, case: OddsRatioSimulationCase, output_d
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--group", choices=["all", "20_80", "balanced"], default="all")
+    parser.add_argument("--group", choices=["all", "20_80", "extreme", "balanced"], default="all")
     parser.add_argument("--probability-source", choices=["both", "oracle", "estimated"], default="both")
     parser.add_argument("--trials", type=int, default=500)
     parser.add_argument("--n-inference", type=int, default=10_000)
     parser.add_argument("--n-train", type=int, default=200)
     parser.add_argument("--active-budget", choices=["proportional", "even"], default="proportional")
-    parser.add_argument("--split-spline-budget-evenly", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--split-spline-budget-evenly", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--seed", type=int, default=614)
     parser.add_argument("--quick", action="store_true", help="Small smoke-test run.")
     parser.add_argument("--no-progress", action="store_true")

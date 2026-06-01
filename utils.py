@@ -129,14 +129,15 @@ def sampling_probs_spline_inv(
     num_knots: int = 5,
     degree: int = 3,
     verbose_solver: bool = False,
-    split_budget_evenly: bool = True,
+    split_budget_evenly: bool = False,
     solver_names: tuple[str, ...] = (cp.ECOS, "CLARABEL", cp.SCS),
 ) -> tuple[np.ndarray | None, np.ndarray | None, dict | None, dict | None]:
     """Optimize spline-parameterized inverse sampling probabilities.
 
-    The optimization models log(1 / p_i) as a spline in a score. When
-    ``split_budget_evenly`` is true, half the expected sampling budget is
-    assigned to each group, matching the current BRCA experiment.
+    The optimization models log(1 / p_i) as a spline in a score. By default,
+    the expected sampling budget is shared across groups proportionally through
+    one joint budget constraint. Set ``split_budget_evenly=True`` only when a
+    half-budget-per-group design is desired.
     """
 
     start_time = time.perf_counter()
@@ -502,6 +503,66 @@ def active_sampling_probabilities(
     return np.clip((1 - tau) * base_probs + tau * target_mean_probability, 0, 1)
 
 
+def normalize_probabilities_to_budget(
+    probabilities: np.ndarray,
+    target_sum: float,
+    eps: float = 1e-10,
+    max_iter: int = 80,
+) -> np.ndarray:
+    """Rescale probabilities to a target expected sample size.
+
+    The output is the clipped vector ``clip(c * probabilities, eps, 1)`` whose
+    sum is as close as possible to ``target_sum``. This is useful after
+    convexly mixing two policies when solver tolerances leave a small budget
+    mismatch.
+    """
+
+    probabilities = np.clip(_as_array(probabilities), eps, 1.0)
+    n = len(probabilities)
+    if n == 0:
+        return probabilities
+    target_sum = float(np.clip(target_sum, n * eps, n))
+
+    def scaled_sum(scale: float) -> float:
+        return float(np.clip(scale * probabilities, eps, 1.0).sum())
+
+    lower = 0.0
+    upper = 1.0
+    while scaled_sum(upper) < target_sum and upper < 1e12:
+        upper *= 2.0
+
+    for _ in range(max_iter):
+        mid = 0.5 * (lower + upper)
+        if scaled_sum(mid) < target_sum:
+            lower = mid
+        else:
+            upper = mid
+    return np.clip(upper * probabilities, eps, 1.0)
+
+
+def mix_probabilities_with_uniform(
+    method_probabilities: np.ndarray,
+    uniform_probability: float,
+    method_weight: float,
+    target_sum: float | None = None,
+) -> np.ndarray:
+    """Convexly mix a policy with uniform sampling.
+
+    ``method_weight=1`` returns the method policy and ``method_weight=0``
+    returns uniform sampling. If ``target_sum`` is supplied, the mixed
+    probabilities are renormalized to that expected budget.
+    """
+
+    method_probabilities = _clip_probabilities(method_probabilities)
+    method_weight = float(np.clip(method_weight, 0.0, 1.0))
+    uniform_probability = float(np.clip(uniform_probability, 0.0, 1.0))
+    mixed = method_weight * method_probabilities + (1.0 - method_weight) * uniform_probability
+    mixed = _clip_probabilities(mixed)
+    if target_sum is not None:
+        mixed = normalize_probabilities_to_budget(mixed, target_sum)
+    return mixed
+
+
 class _BinnedResidualRegressor:
     """Fast one-dimensional smoother used by sequential examples."""
 
@@ -791,7 +852,7 @@ def run_odds_ratio_monte_carlo(
     seed: int | None = None,
     num_knots: int = 5,
     degree: int = 3,
-    split_spline_budget_evenly: bool = True,
+    split_spline_budget_evenly: bool = False,
     uncertainty0: np.ndarray | None = None,
     uncertainty1: np.ndarray | None = None,
     spline_score0: np.ndarray | None = None,
