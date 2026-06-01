@@ -1,7 +1,4 @@
 """Plotting helpers for paper examples.
-
-The default style mirrors ggplot2's theme_bw: white panels, a visible panel
-border, light grid lines, and a colorblind-aware palette.
 """
 
 from __future__ import annotations
@@ -151,7 +148,7 @@ def make_effective_sample_size_multiplier(
     df: pd.DataFrame,
     baseline_method: str = "classical",
 ) -> pd.DataFrame:
-    """Return a copy with ESS divided by the matched classical ESS.
+    """Return ESS divided by the matched classical ESS.
 
     The denominator is matched by budget and, when available, Monte Carlo
     replicate. This makes the classical multiplier exactly one for every
@@ -212,10 +209,9 @@ def plot_effective_sample_size(
 
     By default, this shows one Monte Carlo standard deviation around the mean,
     matching the Robust Sampling paper's ESS convention. Use
-    ``error_bars="none"`` for a clean mean curve, ``error_bars="se"`` for
+    ``error_bars="none"`` for a just the mean curve, ``error_bars="se"`` for
     standard errors, or ``error_style="ribbon"`` for shaded bands instead of
-    vertical bars. ``show_se`` and ``show_iqr`` are retained as deprecated
-    aliases for older notebooks.
+    vertical bars. 
     """
 
     if show_se:
@@ -1479,7 +1475,7 @@ def plot_monte_carlo_variance(
 
 
 def make_monte_carlo_variance_table(df: pd.DataFrame) -> pd.DataFrame:
-    """Return a compact table of MC variance components."""
+    """Return a table of MC variance components."""
 
     summary = monte_carlo_variance_table(df)
     columns = [
@@ -1558,7 +1554,7 @@ def save_monte_carlo_variance_table(
     max_rows: int | None = None,
     show: bool = False,
 ) -> tuple[plt.Figure, plt.Axes]:
-    """Render the MC variance component table to an image file."""
+    """Convert the MC variance component table to an image file."""
 
     set_theme_bw(font_scale=0.85)
     table = make_monte_carlo_variance_table(df)
