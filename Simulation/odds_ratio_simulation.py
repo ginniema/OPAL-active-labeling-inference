@@ -1,9 +1,6 @@
-"""Odds-ratio simulation cases for the paper appendix.
+"""Odds-ratio simulation.
 
-This replaces the duplicated exploratory notebooks from
-``../Simulation/odds ratio`` with one parameterized script. The four default
-cases are:
-
+The four default cases:
 - 20/80 hard/easy group split with oracle sampling probabilities.
 - 20/80 hard/easy group split with estimated sampling probabilities.
 - 50/50 hard/easy group split with oracle sampling probabilities.
@@ -124,7 +121,7 @@ def prepare_population(
     case: OddsRatioSimulationCase,
     config: OddsRatioRunConfig,
 ) -> dict[str, np.ndarray | float]:
-    """Generate data, fit the nuisance model, and return inference arrays."""
+    """Generate data, fit the nuisance model, and return parameter arrays."""
 
     x, y, z, true_probability = generate_odds_ratio_population(
         n_samples=config.n_total,
