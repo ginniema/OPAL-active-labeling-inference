@@ -1,9 +1,4 @@
 """Kendall's tau active-labeling simulation.
-
-This script cleans up the original exploratory code from ``../Kendall's tau``.
-It keeps the Kendall-specific data-generating process and one-step estimator
-local to the simulation, while reusing the shared plotting column names and
-spline-basis helper from the repo root.
 """
 
 from __future__ import annotations
@@ -100,7 +95,7 @@ def fit_mu_on_seed(
 
 
 def kendall_ab_from_score(score: np.ndarray, mu: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Compute the ``A_i`` and ``B_i`` components for Kendall's tau-a."""
+    """Compute the ``A_i`` and ``B_i`` components for Kendall's tau."""
 
     score = np.asarray(score, dtype=float)
     mu = np.asarray(mu, dtype=float)
@@ -152,7 +147,7 @@ def kendall_tau_aipw_from_components(
 
 
 def classical_kendall_influence(score: np.ndarray, y: np.ndarray) -> tuple[float, np.ndarray]:
-    """Return label-only Kendall tau-a and U-statistic influence values."""
+    """Return label-only Kendall tau and U-statistic influence values."""
 
     score = np.asarray(score)
     y = np.asarray(y, dtype=int)
@@ -211,7 +206,7 @@ def classical_kendall_tau_ci(
     alpha: float,
     population_n: int,
 ) -> tuple[float, float, float, float]:
-    """Label-only Kendall tau-a CI on a uniform human-label sample."""
+    """Label-only Kendall tau CI on a uniform human-label sample."""
 
     selected = np.asarray(selected, dtype=bool)
     selected_score = score[selected]
@@ -228,7 +223,7 @@ def classical_kendall_tau_ci(
 
 
 def c_tau_kendall(score: np.ndarray, mu_hat: np.ndarray) -> np.ndarray:
-    """Policy-design weight ``A_i^2 mu_hat_i (1-mu_hat_i)``."""
+    """Policy uncertainty weight ``A_i^2 mu_hat_i (1-mu_hat_i)``."""
 
     a_hat, _ = kendall_ab_from_score(score, mu_hat)
     return a_hat**2 * mu_hat * (1 - mu_hat)
@@ -310,7 +305,7 @@ def spline_policy_inverse(
 
 
 def tau_true_full(score: np.ndarray, y: np.ndarray) -> float:
-    """Exact finite-population Kendall tau-a for binary labels."""
+    """Exact finite-population Kendall tau for binary labels. Ground truth for evaluating coverage."""
 
     score = np.asarray(score)
     y = np.asarray(y)
@@ -404,7 +399,7 @@ def summarize_kendall_results(results: pd.DataFrame) -> tuple[pd.DataFrame, pd.D
 
 
 def run_kendall_simulation(config: KendallSimulationConfig) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Run the Kendall tau simulation and return raw, summary, and ESS tables."""
+    """Run simulation and return raw, summary, and ESS tables."""
 
     x, score, y, _ = generate_kendall_data(
         n=config.n,
