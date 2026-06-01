@@ -29,8 +29,6 @@ The four cases cross group composition with the source of policy probabilities:
 - `odds_ratio_balanced_oracle`: 50/50 hard/easy split, oracle probabilities.
 - `odds_ratio_balanced_estimated`: 50/50 hard/easy split, estimated probabilities.
 
-For a fast smoke test, pass `--quick` to either simulation script.
-
 ## Uniform Mixing
 
 Tune the method-uniform mixing weight for the odds-ratio simulation:
@@ -43,5 +41,4 @@ python Simulation/plot_simulation_results.py --skip-odds --skip-kendall --plot-u
 The selected weights are written to `Simulation/results/uniform_mixing_lambda.csv`;
 the full lambda grid is written to `Simulation/results/uniform_mixing_lambda_grid.csv`.
 The convention is `pi_lambda = lambda * pi_method + (1 - lambda) * pi_uniform`,
-so `lambda = 1` is the unmixed method. The appendix writeup fragment is in
-`Simulation/appendix_uniform_mixing.tex`.
+so `lambda = 1` is the unmixed method.
