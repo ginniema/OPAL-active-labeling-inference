@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-import shutil
 import sys
 
 import matplotlib.pyplot as plt
@@ -47,25 +46,6 @@ EXTREME_ODDS_CASES = [
     ("odds_ratio_extreme_oracle", "(a) Oracle probabilities"),
     ("odds_ratio_extreme_estimated", "(b) Estimated probabilities"),
 ]
-
-LEGACY_ODDS_FILES = {
-    "odds_ratio_20_80_oracle.csv": "sim_hard_oracle_results.csv",
-    "odds_ratio_20_80_estimated.csv": "sim_hard_results.csv",
-    "odds_ratio_balanced_oracle.csv": "sim_easier_oracle_results.csv",
-    "odds_ratio_balanced_estimated.csv": "sim_easier_results.csv",
-}
-
-
-def copy_legacy_odds_results(results_dir: Path) -> None:
-    """Copy old 500-trial CSVs into the cleaned results naming scheme."""
-
-    legacy_dir = REPO_ROOT.parent / "Simulation" / "odds ratio"
-    if not legacy_dir.exists():
-        raise FileNotFoundError(f"Legacy odds-ratio directory not found: {legacy_dir}")
-    results_dir.mkdir(parents=True, exist_ok=True)
-    for clean_name, legacy_name in LEGACY_ODDS_FILES.items():
-        shutil.copy2(legacy_dir / legacy_name, results_dir / clean_name)
-
 
 def _ordered_methods_for_frames(frames: list[pd.DataFrame]) -> list[str]:
     present = set()
@@ -582,7 +562,6 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-dir", type=Path, default=REPO_ROOT / "Simulation" / "results")
     parser.add_argument("--plots-dir", type=Path, default=REPO_ROOT / "Simulation" / "plots")
-    parser.add_argument("--copy-legacy-odds-results", action="store_true")
     parser.add_argument("--skip-odds", action="store_true")
     parser.add_argument("--skip-kendall", action="store_true")
     parser.add_argument("--plot-extreme", action="store_true")
@@ -596,8 +575,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if args.copy_legacy_odds_results:
-        copy_legacy_odds_results(args.results_dir)
     if not args.skip_odds:
         fig, _ = plot_odds_ratio_ess_grid(args.results_dir, args.plots_dir, include_title=args.include_odds_title)
         plt.close(fig)
