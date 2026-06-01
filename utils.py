@@ -1,7 +1,7 @@
-"""Shared numerical helpers for the active-inference examples.
+"""Shared helpers for the active-inference examples.
 
-The functions in this module are intentionally not tied to a particular
-dataset. Example-specific data loading and presentation code should stay in
+The functions in this module are not tied to a particular
+dataset. Example-specific data loading and presentation code occurs in
 the notebooks or in dataset-specific modules.
 """
 
@@ -255,7 +255,7 @@ def opt_mean_tuning(
     weights: np.ndarray,
     sampling_ratio: np.ndarray,
 ) -> float:
-    """Estimate the scalar tuning parameter used by the rectified mean."""
+    """Estimate the scalar tuning parameter."""
 
     y = _as_array(y)
     yhat = _as_array(yhat)
@@ -512,8 +512,8 @@ def normalize_probabilities_to_budget(
     """Rescale probabilities to a target expected sample size.
 
     The output is the clipped vector ``clip(c * probabilities, eps, 1)`` whose
-    sum is as close as possible to ``target_sum``. This is useful after
-    convexly mixing two policies when solver tolerances leave a small budget
+    sum is as close as possible to ``target_sum``. This is useful after 
+    mixing two policies when solver tolerances leave a small budget
     mismatch.
     """
 
@@ -546,7 +546,7 @@ def mix_probabilities_with_uniform(
     method_weight: float,
     target_sum: float | None = None,
 ) -> np.ndarray:
-    """Convexly mix a policy with uniform sampling.
+    """Mix a policy with uniform sampling.
 
     ``method_weight=1`` returns the method policy and ``method_weight=0``
     returns uniform sampling. If ``target_sum`` is supplied, the mixed
@@ -564,7 +564,7 @@ def mix_probabilities_with_uniform(
 
 
 class _BinnedResidualRegressor:
-    """Fast one-dimensional smoother used by sequential examples."""
+    """One-dimensional smoother used by sequential examples."""
 
     def __init__(self, n_bins: int = 12):
         self.n_bins = n_bins
@@ -870,8 +870,7 @@ def run_odds_ratio_monte_carlo(
     ``p * (1-p)`` is used.
 
     ``active_budget="proportional"`` gives each group the same expected label
-    fraction. ``"even"`` spends half of the total expected labels in each group,
-    matching the older Stance workflow.
+    fraction. ``"even"`` spends half of the total expected labels in each group.
     """
 
     y0 = _as_array(y0)
@@ -1142,11 +1141,7 @@ def run_sequential_odds_ratio_monte_carlo(
     uncertainty_bins: int = 12,
     show_progress: bool = True,
 ) -> pd.DataFrame:
-    """Run a sequential active-labeling odds-ratio Monte Carlo comparison.
-
-    Unlike the archived sequential CSVs, this runner computes the exact
-    finite-population calibration inside each replicate while the selected
-    labels and their first-order sampling probabilities are still available.
+    """Run sequential active-labeling odds-ratio Monte Carlo.
     """
 
     y = _as_array(y)
