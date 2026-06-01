@@ -17,7 +17,7 @@ against the fixed empirical population, following the paper's Appendix I.2
 calibration.
 
 ## Additional Examples
--`BRCA/BRCA_active_clean.ipynb`: cleaned BRCA TNBA workflow.
+- `BRCA/BRCA_active_clean.ipynb`: cleaned BRCA TNBA workflow.
 - `CheXpert/CheXpert_active_clean.ipynb`: cleaned Cardiomegaly AP-vs-PA workflow.
 - `Alphafold/Alphafold_active_clean.ipynb`: cleaned phosphorylation-vs-nonphosphorylation workflow.
 - `Stance/Stance_active_clean.ipynb`: cleaned stance batch workflow.
