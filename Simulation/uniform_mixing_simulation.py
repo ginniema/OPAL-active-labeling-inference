@@ -1,18 +1,11 @@
 """Tune method-uniform mixing weights for the odds-ratio simulation.
 
-This script cleans the exploratory lambda-tuning cells from
-``../Simulation/Mean_est_batch.ipynb``. For each budget, it estimates the
-Monte Carlo variance obtained by mixing either active or OPAL sampling with
-uniform sampling and chooses the method weight that minimizes the empirical
-variance of the log odds-ratio estimate on the labeled pilot set.
+For each budget, we estimate the Monte Carlo variance obtained by mixing either active or OPAL sampling with
+uniform sampling and chooses the method weight that minimizes the empirical variance of the log odds-ratio estimate on the labeled pilot set.
 
-The mixing convention here is
-
+The mixing convention is
     pi_lambda = lambda * pi_method + (1 - lambda) * pi_uniform,
-
 so lambda=1 is the original method and lambda=0 is pure uniform sampling.
-This is the opposite of the ``tau`` convention in ``active_sampling_probabilities``,
-where tau denotes the uniform weight.
 """
 
 from __future__ import annotations
